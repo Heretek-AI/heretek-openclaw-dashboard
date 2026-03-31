@@ -67,10 +67,10 @@ services:
       - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
       - GF_LOG_LEVEL=info
       - GF_UNIFIED_ALERTING_ENABLED=true
-      - GF_ALERTING_ENABLED=true
+      - GF_ALERTING_ENABLED=false
     volumes:
       - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/dashboards:ro
       - grafana_data:/var/lib/grafana
     depends_on:
