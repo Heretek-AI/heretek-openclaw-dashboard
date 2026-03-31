@@ -1,0 +1,208 @@
+# ==============================================================================
+# Heretek OpenClaw — Monitoring Stack (P2-3)
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# 
+# This file contains the Prometheus/Grafana monitoring stack services.
+# Deploy alongside the main docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+#
+# Documentation: docs/operations/MONITORING_STACK.md
+# ==============================================================================
+
+services:
+  # ==============================================================================
+  # Prometheus - Metrics Collection & Alerting
+  # ==============================================================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: heretek-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=10GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--log.level=info'
+    depends_on:
+      - langfuse
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=prometheus"
+
+  # ==============================================================================
+  # Grafana - Visualization & Dashboards
+  # ==============================================================================
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: heretek-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:${GRAFANA_PORT:-3001}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+      - GF_LOG_LEVEL=info
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_ALERTING_ENABLED=true
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=grafana"
+
+  # ==============================================================================
+  # Node Exporter - System Metrics (CPU, Memory, Disk, Network)
+  # ==============================================================================
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: heretek-node-exporter
+    restart: unless-stopped
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.ignored-mount-points="^/(sys|proc|dev|host|etc)($$|/)"'
+      - '--collector.netclass.ignored-devices="^(veth.*|docker.*|br-.*)$$"'
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=node-exporter"
+
+  # ==============================================================================
+  # cAdvisor - Container Resource Metrics
+  # ==============================================================================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: heretek-cadvisor
+    restart: unless-stopped
+    ports:
+      - "${CADVISOR_PORT:-8080}:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=cadvisor"
+
+  # ==============================================================================
+  # Redis Exporter - Redis Metrics
+  # ==============================================================================
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.58.0
+    container_name: heretek-redis-exporter
+    restart: unless-stopped
+    ports:
+      - "${REDIS_EXPORTER_PORT:-9121}:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+      - REDIS_EXPORTER_WEB_LISTEN_ADDRESS=:9121
+      - REDIS_EXPORTER_LOG_FORMAT=json
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=redis-exporter"
+
+  # ==============================================================================
+  # Postgres Exporter - PostgreSQL Metrics
+  # ==============================================================================
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: heretek-postgres-exporter
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_EXPORTER_PORT:-9187}:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-heretek}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-heretek}?sslmode=disable
+      - PG_EXPORTER_WEB_LISTEN_ADDRESS=:9187
+      - PG_EXPORTER_AUTO_DISCOVER_DATABASES=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=postgres-exporter"
+
+  # ==============================================================================
+  # Blackbox Exporter - Endpoint Probing (HTTP, TCP, ICMP)
+  # ==============================================================================
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: heretek-blackbox-exporter
+    restart: unless-stopped
+    ports:
+      - "${BLACKBOX_EXPORTER_PORT:-9115}:9115"
+    volumes:
+      - ./monitoring/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    command:
+      - '--config.file=/etc/blackbox/blackbox.yml'
+      - '--web.listen-address=:9115'
+    networks:
+      - heretek-network
+    labels:
+      - "heretek.component=monitoring"
+      - "heretek.service=blackbox-exporter"
+
+# ==============================================================================
+# Volumes — Monitoring Stack Persistent Data
+# ==============================================================================
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

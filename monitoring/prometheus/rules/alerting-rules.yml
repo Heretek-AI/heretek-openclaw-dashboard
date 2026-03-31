@@ -1,0 +1,378 @@
+# ==============================================================================
+# Prometheus Alerting Rules for Heretek OpenClaw
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# 
+# Alerting rules based on thresholds from docs/operations/monitoring-config.json
+# ==============================================================================
+
+groups:
+  # ==============================================================================
+  # System Resource Alerts
+  # ==============================================================================
+  - name: system_resources
+    interval: 30s
+    rules:
+      # CPU Alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 90% for more than 5 minutes (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      - alert: VeryHighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "Critical CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 95% for more than 2 minutes (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-emergency-shutdown.md"
+
+      # Memory Alerts
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 90% for more than 5 minutes (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      - alert: VeryHighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "Critical memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 95% for more than 2 minutes (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-emergency-shutdown.md"
+
+      # Disk Alerts
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}) / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          category: system
+        annotations:
+          summary: "High disk usage on {{ $labels.instance }}"
+          description: "Disk usage is above 90% for more than 10 minutes (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      - alert: CriticalDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}) / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} * 100 > 95
+        for: 5m
+        labels:
+          severity: critical
+          category: system
+        annotations:
+          summary: "Critical disk usage on {{ $labels.instance }}"
+          description: "Disk usage is above 95% - immediate action required (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-emergency-shutdown.md"
+
+  # ==============================================================================
+  # Container Resource Alerts
+  # ==============================================================================
+  - name: container_resources
+    interval: 30s
+    rules:
+      # Container CPU
+      - alert: ContainerHighCPU
+        expr: sum by(container_name) (rate(container_cpu_usage_seconds_total{container_name!=""}[5m])) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.container_name }} has high CPU usage"
+          description: "Container CPU usage is above 80% for more than 5 minutes"
+
+      # Container Memory
+      - alert: ContainerHighMemory
+        expr: sum by(container_name) (container_memory_usage_bytes{container_name!=""}) / sum by(container_name) (container_spec_memory_limit_bytes{container_name!=""}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.container_name }} has high memory usage"
+          description: "Container memory usage is above 85% for more than 5 minutes"
+
+      # Container OOM Kill
+      - alert: ContainerOOMKilled
+        expr: increase(container_oom_events_total{container_name!=""}[1h]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: container
+        annotations:
+          summary: "Container {{ $labels.container_name }} was OOM killed"
+          description: "Container {{ $labels.container_name }} was killed due to out of memory condition"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+  # ==============================================================================
+  # Service Health Alerts
+  # ==============================================================================
+  - name: service_health
+    interval: 30s
+    rules:
+      # LiteLLM Gateway
+      - alert: LiteLLMDown
+        expr: probe_success{job="blackbox-http", instance="http://litellm:4000/health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: service
+        annotations:
+          summary: "LiteLLM Gateway is down"
+          description: "LiteLLM Gateway health check has failed for more than 1 minute"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      # PostgreSQL
+      - alert: PostgreSQLDown
+        expr: probe_success{job="blackbox-tcp", instance="postgres:5432"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: service
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL TCP connection check has failed for more than 1 minute"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-database-corruption.md"
+
+      # Redis
+      - alert: RedisDown
+        expr: probe_success{job="blackbox-tcp", instance="redis:6379"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: service
+        annotations:
+          summary: "Redis cache is down"
+          description: "Redis TCP connection check has failed for more than 1 minute"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      # Ollama
+      - alert: OllamaDown
+        expr: probe_success{job="blackbox-http", instance="http://ollama:11434/"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: service
+        annotations:
+          summary: "Ollama local LLM is down"
+          description: "Ollama health check has failed for more than 2 minutes"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      # Langfuse
+      - alert: LangfuseDown
+        expr: probe_success{job="blackbox-http", instance="http://langfuse:3000/api/health"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          category: service
+        annotations:
+          summary: "Langfuse observability is down"
+          description: "Langfuse health check has failed for more than 2 minutes"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/LANGFUSE_OBSERVABILITY.md"
+
+  # ==============================================================================
+  # Agent Health Alerts (based on Gateway metrics)
+  # ==============================================================================
+  - name: agent_health
+    interval: 30s
+    rules:
+      # Agent Offline (heartbeat missed)
+      - alert: AgentOffline
+        expr: openclaw_agent_heartbeat_age_seconds > 120
+        for: 2m
+        labels:
+          severity: critical
+          category: agent
+        annotations:
+          summary: "Agent {{ $labels.agent_id }} is offline"
+          description: "Agent {{ $labels.agent_id }} has not responded for more than 2 minutes"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-agent-restart.md"
+
+      # Agent Unhealthy
+      - alert: AgentUnhealthy
+        expr: openclaw_agent_health_score < 0.5
+        for: 5m
+        labels:
+          severity: warning
+          category: agent
+        annotations:
+          summary: "Agent {{ $labels.agent_id }} is unhealthy"
+          description: "Agent {{ $labels.agent_id }} health score is below 0.5 (current: {{ $value | printf \"%.2f\" }})"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      # Triad Node Down (critical for deliberation)
+      - alert: TriadNodeDown
+        expr: openclaw_agent_status{agent_id=~"alpha|beta|charlie"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: triad
+        annotations:
+          summary: "Triad node {{ $labels.agent_id }} is down"
+          description: "Triad deliberation node {{ $labels.agent_id }} is not responding - consensus may be impacted"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-agent-restart.md"
+
+  # ==============================================================================
+  # Database Alerts
+  # ==============================================================================
+  - name: database_health
+    interval: 30s
+    rules:
+      # PostgreSQL Connection Pool
+      - alert: PostgreSQLConnectionPoolHigh
+        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "PostgreSQL connection pool is running high"
+          description: "PostgreSQL connection pool usage is above 80% (current: {{ $value | printf \"%.1f\" }}%)"
+
+      - alert: PostgreSQLConnectionPoolCritical
+        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 90
+        for: 2m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "PostgreSQL connection pool is nearly exhausted"
+          description: "PostgreSQL connection pool usage is above 90% (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-database-corruption.md"
+
+      # PostgreSQL Replication Lag (if replication is configured)
+      - alert: PostgreSQLReplicationLag
+        expr: pg_replication_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "PostgreSQL replication lag detected"
+          description: "PostgreSQL replication lag is {{ $value | printf \"%.1f\" }} seconds"
+
+  # ==============================================================================
+  # Redis Alerts
+  # ==============================================================================
+  - name: redis_health
+    interval: 30s
+    rules:
+      # Redis Memory
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: cache
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "Redis memory usage is above 80% (current: {{ $value | printf \"%.1f\" }}%)"
+
+      - alert: RedisMemoryCritical
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 2m
+        labels:
+          severity: critical
+          category: cache
+        annotations:
+          summary: "Redis memory usage is critical"
+          description: "Redis memory usage is above 90% (current: {{ $value | printf \"%.1f\" }}%)"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      # Redis Connected Clients
+      - alert: RedisConnectedClientsHigh
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+          category: cache
+        annotations:
+          summary: "Redis has many connected clients"
+          description: "Redis has {{ $value }} connected clients"
+
+  # ==============================================================================
+  # LLM/Token Usage Alerts
+  # ==============================================================================
+  - name: llm_usage
+    interval: 30s
+    rules:
+      # High Token Usage Rate
+      - alert: HighTokenUsageRate
+        expr: rate(litellm_tokens_total[5m]) > 10000
+        for: 10m
+        labels:
+          severity: warning
+          category: llm
+        annotations:
+          summary: "High token usage rate detected"
+          description: "Token usage rate is {{ $value | printf \"%.0f\" }} tokens/second over the last 5 minutes"
+
+      # High Error Rate
+      - alert: HighLLMErrorRate
+        expr: sum(rate(litellm_responses_total{status="error"}[5m])) / sum(rate(litellm_responses_total[5m])) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: llm
+        annotations:
+          summary: "High LLM error rate"
+          description: "LLM error rate is {{ $value | printf \"%.1f\" }}% over the last 5 minutes"
+          runbook_url: "https://github.com/heretek-ai/heretek-openclaw/blob/main/docs/operations/runbook-service-failure.md"
+
+      # High Latency
+      - alert: HighLLMLatency
+        expr: histogram_quantile(0.95, sum(rate(litellm_request_duration_seconds_bucket[5m])) by (le)) > 5
+        for: 5m
+        labels:
+          severity: warning
+          category: llm
+        annotations:
+          summary: "High LLM latency"
+          description: "95th percentile LLM latency is {{ $value | printf \"%.1f\" }} seconds"
+
+  # ==============================================================================
+  # Langfuse Observability Alerts
+  # ==============================================================================
+  - name: langfuse_observability
+    interval: 30s
+    rules:
+      # Langfuse High Trace Count
+      - alert: LangfuseHighTraceCount
+        expr: rate(langfuse_traces_total[5m]) > 100
+        for: 10m
+        labels:
+          severity: warning
+          category: observability
+        annotations:
+          summary: "High trace ingestion rate in Langfuse"
+          description: "Langfuse is ingesting {{ $value | printf \"%.0f\" }} traces/second"
+
+      # Langfuse Database Size
+      - alert: LangfuseDatabaseSize
+        expr: langfuse_database_size_bytes > 10737418240  # 10GB
+        for: 1h
+        labels:
+          severity: warning
+          category: observability
+        annotations:
+          summary: "Langfuse database size is growing"
+          description: "Langfuse database size is {{ $value | humanize1024 }}"

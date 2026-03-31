@@ -1,0 +1,30 @@
+# ==============================================================================
+# Grafana Datasource Provisioning for Heretek OpenClaw
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# ==============================================================================
+
+apiVersion: 1
+
+datasources:
+  # Prometheus - Primary metrics datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: "POST"
+
+  # Langfuse - LLM Observability (via Loki for logs)
+  - name: Langfuse
+    type: prometheus
+    access: proxy
+    url: http://langfuse:3000/api/metrics
+    editable: true
+    jsonData:
+      timeInterval: "30s"

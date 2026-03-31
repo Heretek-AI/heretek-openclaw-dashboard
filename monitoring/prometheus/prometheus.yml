@@ -1,0 +1,190 @@
+# ==============================================================================
+# Prometheus Configuration for Heretek OpenClaw Monitoring Stack
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# 
+# This configuration scrapes metrics from:
+# - OpenClaw Gateway (port 18789)
+# - LiteLLM Gateway (port 4000)
+# - PostgreSQL with pgvector (port 5432)
+# - Redis (port 6379)
+# - Ollama (port 11434)
+# - Langfuse (port 3000)
+# - Node Exporter (system metrics)
+# ==============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'heretek-openclaw'
+    environment: 'production'
+    cluster: 'openclaw-gateway'
+
+# Alertmanager configuration (optional - uncomment when Alertmanager is deployed)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Rule files for alerting
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+# Scrape configurations
+scrape_configs:
+  # ==============================================================================
+  # Prometheus Self-Monitoring
+  # ==============================================================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          team: 'infrastructure'
+
+  # ==============================================================================
+  # OpenClaw Gateway - Agent Collective Metrics
+  # ==============================================================================
+  # The Gateway exposes metrics for all 11 agents running as workspaces
+  # ==============================================================================
+  - job_name: 'openclaw-gateway'
+    static_configs:
+      - targets: ['host.docker.internal:18789']
+        labels:
+          service: 'openclaw-gateway'
+          team: 'agents'
+          agents: 'steward,alpha,beta,charlie,examiner,explorer,sentinel,coder,dreamer,empath,historian'
+    metrics_path: /metrics
+    # Retry configuration for Gateway that may not always expose metrics
+    scrape_timeout: 10s
+    honor_labels: true
+
+  # ==============================================================================
+  # LiteLLM Gateway - LLM Routing & A2A Metrics
+  # ==============================================================================
+  - job_name: 'litellm'
+    static_configs:
+      - targets: ['litellm:4000']
+        labels:
+          service: 'litellm'
+          team: 'llm-routing'
+    metrics_path: /metrics
+    scrape_timeout: 10s
+
+  # ==============================================================================
+  # PostgreSQL with pgvector - Database Metrics
+  # ==============================================================================
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgres'
+          team: 'database'
+          database_type: 'postgresql'
+          extensions: 'pgvector'
+
+  # ==============================================================================
+  # Redis - Cache & Message Broker Metrics
+  # ==============================================================================
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+          team: 'cache'
+          redis_role: 'primary'
+
+  # ==============================================================================
+  # Ollama - Local LLM Runtime Metrics
+  # ==============================================================================
+  - job_name: 'ollama'
+    static_configs:
+      - targets: ['ollama:11434']
+        labels:
+          service: 'ollama'
+          team: 'local-llm'
+          gpu_type: 'amd_rocm'
+    metrics_path: /metrics
+
+  # ==============================================================================
+  # Langfuse - LLM Observability Platform
+  # ==============================================================================
+  - job_name: 'langfuse'
+    static_configs:
+      - targets: ['langfuse:3000']
+        labels:
+          service: 'langfuse'
+          team: 'observability'
+    metrics_path: /api/metrics
+    scrape_timeout: 10s
+
+  # ==============================================================================
+  # Node Exporter - System Metrics (CPU, Memory, Disk, Network)
+  # ==============================================================================
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node'
+          team: 'infrastructure'
+          os: 'linux'
+
+  # ==============================================================================
+  # cAdvisor - Container Metrics (Resource Usage per Container)
+  # ==============================================================================
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+          team: 'infrastructure'
+    honor_labels: true
+
+  # ==============================================================================
+  # Blackbox Exporter - Endpoint Health Checks
+  # ==============================================================================
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://litellm:4000/health
+          - http://langfuse:3000/api/health
+          - http://ollama:11434/
+        labels:
+          probe_type: 'http'
+          team: 'infrastructure'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ==============================================================================
+  # Blackbox Exporter - TCP Port Checks
+  # ==============================================================================
+  - job_name: 'blackbox-tcp'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - postgres:5432
+          - redis:6379
+          - ollama:11434
+        labels:
+          probe_type: 'tcp'
+          team: 'infrastructure'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

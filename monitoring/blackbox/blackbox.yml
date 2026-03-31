@@ -1,0 +1,68 @@
+# ==============================================================================
+# Blackbox Exporter Configuration for Heretek OpenClaw
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# ==============================================================================
+
+modules:
+  # HTTP probing - checks for HTTP 2xx response
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200, 201, 202, 204]
+      method: GET
+      follow_redirects: true
+      fail_if_ssl: false
+      fail_if_not_ssl: false
+      tls_config:
+        insecure_skip_verify: false
+      preferred_ip_protocol: "ip4"
+
+  # HTTP probing with POST for health endpoints
+  http_post_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200, 201, 202, 204]
+      method: POST
+      follow_redirects: true
+      preferred_ip_protocol: "ip4"
+
+  # TCP connection probing
+  tcp_connect:
+    prober: tcp
+    timeout: 10s
+    tcp:
+      preferred_ip_protocol: "ip4"
+      ip_protocol_fallback: false
+
+  # ICMP ping probing (requires privileged container)
+  icmp_echo:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: "ip4"
+      source_ip_address: "0.0.0.0"
+
+  # DNS probing
+  dns_tcp:
+    prober: dns
+    timeout: 5s
+    dns:
+      transport_protocol: "tcp"
+      preferred_ip_protocol: "ip4"
+      query_name: "localhost"
+      query_type: "A"
+
+  dns_udp:
+    prober: dns
+    timeout: 5s
+    dns:
+      transport_protocol: "udp"
+      preferred_ip_protocol: "ip4"
+      query_name: "localhost"
+      query_type: "A"

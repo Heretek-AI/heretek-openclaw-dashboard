@@ -1,0 +1,20 @@
+# ==============================================================================
+# Grafana Dashboard Provisioning for Heretek OpenClaw
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# ==============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: 'Heretek OpenClaw Dashboards'
+    orgId: 1
+    folder: 'Heretek OpenClaw'
+    folderUid: 'heretek-openclaw'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
