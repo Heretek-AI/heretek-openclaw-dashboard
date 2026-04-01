@@ -1,0 +1,25 @@
+{
+  "name": "@heretek/control-dashboard",
+  "version": "1.0.0",
+  "description": "Heretek Control Dashboard - Mobile-first PWA for triad monitoring and consciousness metrics",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 18791",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 18791",
+    "start": "node src/server/api-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "node-fetch": "^3.3.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}
