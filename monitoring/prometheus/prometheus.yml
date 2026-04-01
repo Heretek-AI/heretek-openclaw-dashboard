@@ -52,7 +52,7 @@ scrape_configs:
   # ==============================================================================
   - job_name: 'openclaw-gateway'
     static_configs:
-      - targets: ['host.docker.internal:18789']
+      - targets: ['192.168.31.166:18789']
         labels:
           service: 'openclaw-gateway'
           team: 'agents'
@@ -188,3 +188,12 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
+
+  # ==============================================================================
+  # OpenClaw Agent Metrics
+  # ==============================================================================
+  - job_name: 'openclaw-agents'
+    static_configs:
+      - targets: ['192.168.31.166:9091']
+    metrics_path: /metrics
+    scrape_interval: 30s
