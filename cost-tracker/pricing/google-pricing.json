@@ -1,0 +1,43 @@
+{
+  "provider": "google",
+  "name": "Google AI (Gemini)",
+  "last_updated": "2026-03-31",
+  "currency": "USD",
+  "models": {
+    "gemini-2.0-flash": {
+      "input_cost_per_token": 0.0000001,
+      "output_cost_per_token": 0.0000004,
+      "cache_read_cost_per_token": 0.000000025,
+      "max_tokens": 1048576,
+      "description": "Gemini 2.0 Flash - Fast and efficient"
+    },
+    "gemini-2.0-flash-lite": {
+      "input_cost_per_token": 0.000000075,
+      "output_cost_per_token": 0.0000003,
+      "cache_read_cost_per_token": 0.00000001875,
+      "max_tokens": 1048576,
+      "description": "Gemini 2.0 Flash Lite - Most cost-effective"
+    },
+    "gemini-1.5-pro": {
+      "input_cost_per_token": 0.00000125,
+      "output_cost_per_token": 0.000005,
+      "cache_read_cost_per_token": 0.0000003125,
+      "max_tokens": 2097152,
+      "description": "Gemini 1.5 Pro - Advanced reasoning"
+    },
+    "gemini-1.5-flash": {
+      "input_cost_per_token": 0.000000075,
+      "output_cost_per_token": 0.0000003,
+      "cache_read_cost_per_token": 0.00000001875,
+      "max_tokens": 1048576,
+      "description": "Gemini 1.5 Flash - Fast processing"
+    },
+    "gemini-1.0-pro": {
+      "input_cost_per_token": 0.000000125,
+      "output_cost_per_token": 0.0000005,
+      "cache_read_cost_per_token": 0.00000003125,
+      "max_tokens": 32768,
+      "description": "Gemini 1.0 Pro - Legacy model"
+    }
+  }
+}

@@ -1,0 +1,274 @@
+# ==============================================================================
+# Heretek OpenClaw Alert Rules Configuration
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# ==============================================================================
+
+# Alert Thresholds
+thresholds:
+  # Agent Alert Thresholds
+  agent:
+    heartbeatWarning: 120       # seconds since last heartbeat
+    heartbeatCritical: 300      # seconds since last heartbeat
+    healthWarning: 0.5          # health score threshold (0-1)
+    healthCritical: 0.3         # health score threshold (0-1)
+    memoryWarning: 512          # MB
+    memoryCritical: 1024        # MB
+    taskTimeoutWarning: 300     # seconds
+    taskTimeoutCritical: 600    # seconds
+
+  # Service Alert Thresholds
+  service:
+    responseWarning: 2000       # milliseconds
+    responseCritical: 5000      # milliseconds
+    uptimeWarning: 99.0         # percent
+    uptimeCritical: 95.0        # percent
+    errorRateWarning: 5         # percent
+    errorRateCritical: 10       # percent
+
+  # Resource Alert Thresholds
+  resources:
+    cpuWarning: 80              # percent
+    cpuCritical: 95             # percent
+    memoryWarning: 80           # percent
+    memoryCritical: 95          # percent
+    diskWarning: 80             # percent
+    diskCritical: 95            # percent
+    networkWarning: 80          # percent utilization
+    networkCritical: 95         # percent utilization
+
+  # Langfuse Alert Thresholds
+  langfuse:
+    errorRateWarning: 5         # percent
+    errorRateCritical: 10       # percent
+    latencyWarning: 3000        # milliseconds
+    latencyCritical: 10000      # milliseconds
+    traceCountWarning: 10000    # traces per hour
+    traceCountCritical: 50000   # traces per hour
+
+  # LiteLLM Alert Thresholds
+  litellm:
+    errorRateWarning: 5         # percent
+    errorRateCritical: 10       # percent
+    latencyWarning: 5000        # milliseconds
+    latencyCritical: 15000      # milliseconds
+    tokenRateWarning: 10000     # tokens per minute
+    tokenRateCritical: 50000    # tokens per minute
+    costWarning: 50             # dollars per day
+    costCritical: 100           # dollars per day
+
+  # Session Alert Thresholds
+  sessions:
+    countWarning: 100           # active sessions
+    countCritical: 500          # active sessions
+    durationWarning: 3600       # seconds
+    durationCritical: 7200      # seconds
+
+  # A2A Communication Thresholds
+  a2a:
+    messageRateWarning: 100     # messages per minute
+    messageRateCritical: 500    # messages per minute
+    latencyWarning: 1000        # milliseconds
+    latencyCritical: 5000       # milliseconds
+    errorRateWarning: 5         # percent
+    errorRateCritical: 15       # percent
+
+  # Cron Job Thresholds
+  cron:
+    missedRunWarning: 1         # consecutive missed runs
+    missedRunCritical: 3        # consecutive missed runs
+    durationWarning: 600        # seconds
+    durationCritical: 1800      # seconds
+
+  # Deliberation Thresholds
+  deliberation:
+    durationWarning: 300        # seconds
+    durationCritical: 900       # seconds
+    consensusFailureWarning: 2  # consecutive failures
+    consensusFailureCritical: 5 # consecutive failures
+
+  # Memory/Vector Database Thresholds
+  memory:
+    vectorCountWarning: 100000      # vectors
+    vectorCountCritical: 500000     # vectors
+    queryLatencyWarning: 500        # milliseconds
+    queryLatencyCritical: 2000      # milliseconds
+    indexSizeWarning: 5368709120    # bytes (5GB)
+    indexSizeCritical: 10737418240  # bytes (10GB)
+
+# Alert Routing Rules
+routing:
+  rules:
+    # Route critical alerts to all channels
+    - match:
+        severity: "critical"
+      channels:
+        - "console"
+        - "webhook"
+        - "slack"
+        - "email"
+
+    # Route agent alerts
+    - match:
+        category: "agent"
+      channels:
+        - "console"
+        - "slack"
+
+    # Route service alerts
+    - match:
+        category: "service"
+      channels:
+        - "console"
+        - "webhook"
+        - "slack"
+
+    # Route resource alerts
+    - match:
+        category: "resource"
+      channels:
+        - "console"
+
+    # Route Langfuse alerts
+    - match:
+        category: "langfuse"
+      channels:
+        - "console"
+        - "email"
+
+    # Route session alerts
+    - match:
+        category: "session"
+      channels:
+        - "console"
+
+# Notification Channels
+notifications:
+  channels:
+    # Console notifications (always enabled)
+    - id: "console"
+      type: "console"
+      enabled: true
+      format: "colored"
+
+    # Webhook notifications
+    - id: "webhook"
+      type: "webhook"
+      enabled: false
+      url: ""
+      method: "POST"
+      headers:
+        Content-Type: "application/json"
+      payload:
+        alert: "{{alert}}"
+        timestamp: "{{timestamp}}"
+
+    # Slack notifications
+    - id: "slack"
+      type: "slack"
+      enabled: false
+      webhookUrl: ""
+      channel: "#openclaw-alerts"
+      username: "OpenClaw Monitor"
+      iconEmoji: ":robot_face:"
+      mentionUsers:
+        critical: ["@channel"]
+        warning: []
+
+    # Email notifications
+    - id: "email"
+      type: "email"
+      enabled: false
+      smtp:
+        host: ""
+        port: 587
+        secure: false
+        requireTLS: true
+        auth:
+          user: ""
+          pass: ""
+      from: "openclaw-alerts@example.com"
+      to: []
+      cc: []
+      subject: "[OpenClaw] {{severity}}: {{title}}"
+
+    # PagerDuty integration
+    - id: "pagerduty"
+      type: "pagerduty"
+      enabled: false
+      routingKey: ""
+      severity:
+        critical: "critical"
+        warning: "warning"
+        info: "info"
+
+# Alert Suppression Rules
+suppression:
+  rules:
+    # Suppress duplicate alerts within time window
+    - name: "duplicate-suppression"
+      enabled: true
+      window: 300  # seconds
+      matchFields:
+        - "id"
+        - "severity"
+
+    # Suppress alerts during maintenance windows
+    - name: "maintenance-window"
+      enabled: false
+      schedule:
+        - day: "sunday"
+          start: "02:00"
+          end: "04:00"
+          timezone: "UTC"
+
+    # Suppress info alerts during high-severity incidents
+    - name: "severity-cascade"
+      enabled: true
+      suppressSeverity: ["info"]
+      whenSeverity: ["critical"]
+      window: 600  # seconds
+
+# Alert Escalation Rules
+escalation:
+  rules:
+    # Escalate unacknowledged critical alerts
+    - name: "critical-escalation"
+      enabled: true
+      match:
+        severity: "critical"
+      afterSeconds: 900  # 15 minutes
+      actions:
+        - type: "notify"
+          channels: ["email", "pagerduty"]
+        - type: "upgrade"
+          severity: "critical"
+
+    # Escalate repeated warnings
+    - name: "warning-escalation"
+      enabled: true
+      match:
+        severity: "warning"
+      occurrences: 5
+      windowSeconds: 1800  # 30 minutes
+      actions:
+        - type: "upgrade"
+          severity: "critical"
+
+# Alert Aggregation Rules
+aggregation:
+  rules:
+    # Aggregate alerts by category
+    - name: "category-aggregation"
+      enabled: true
+      groupBy: "category"
+      windowSeconds: 300
+      summaryFormat: "{{count}} {{severity}} alerts in {{category}}"
+
+    # Aggregate alerts by agent
+    - name: "agent-aggregation"
+      enabled: true
+      groupBy: "agent"
+      windowSeconds: 300
+      summaryFormat: "{{count}} alerts for agent {{agent}}"

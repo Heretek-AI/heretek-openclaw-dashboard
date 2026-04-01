@@ -1,0 +1,29 @@
+{
+  "provider": "xai",
+  "name": "xAI (Grok)",
+  "last_updated": "2026-03-31",
+  "currency": "USD",
+  "models": {
+    "grok-2": {
+      "input_cost_per_token": 0.000002,
+      "output_cost_per_token": 0.00001,
+      "cache_read_cost_per_token": 0.0000005,
+      "max_tokens": 131072,
+      "description": "Grok-2 - Standard model"
+    },
+    "grok-2-mini": {
+      "input_cost_per_token": 0.0000003,
+      "output_cost_per_token": 0.0000015,
+      "cache_read_cost_per_token": 0.000000075,
+      "max_tokens": 131072,
+      "description": "Grok-2 Mini - Lightweight option"
+    },
+    "grok-beta": {
+      "input_cost_per_token": 0.000005,
+      "output_cost_per_token": 0.000025,
+      "cache_read_cost_per_token": 0.00000125,
+      "max_tokens": 131072,
+      "description": "Grok Beta - Experimental features"
+    }
+  }
+}

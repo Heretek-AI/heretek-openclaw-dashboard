@@ -1,0 +1,95 @@
+{
+  "provider": "ollama",
+  "name": "Ollama (Self-hosted)",
+  "last_updated": "2026-03-31",
+  "currency": "USD",
+  "pricing_model": "self-hosted",
+  "models": {
+    "llama3.1": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 128000,
+      "description": "Llama 3.1 - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.50,
+        "tokens_per_hour": 10000000
+      }
+    },
+    "llama3": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 8192,
+      "description": "Llama 3 - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.50,
+        "tokens_per_hour": 10000000
+      }
+    },
+    "mistral": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 8192,
+      "description": "Mistral - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.50,
+        "tokens_per_hour": 10000000
+      }
+    },
+    "mixtral": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 32768,
+      "description": "Mixtral 8x7B - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.75,
+        "tokens_per_hour": 8000000
+      }
+    },
+    "codellama": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 16384,
+      "description": "Code Llama - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.50,
+        "tokens_per_hour": 10000000
+      }
+    },
+    "nomic-embed-text-v2-moe": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 8192,
+      "description": "Nomic Embed Text v2 MoE - Embedding model",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.25,
+        "embeddings_per_hour": 500000
+      }
+    },
+    "gemma2": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 8192,
+      "description": "Gemma 2 - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.50,
+        "tokens_per_hour": 10000000
+      }
+    },
+    "qwen2.5": {
+      "input_cost_per_token": 0,
+      "output_cost_per_token": 0,
+      "max_tokens": 32768,
+      "description": "Qwen 2.5 - Self-hosted, hardware costs only",
+      "hardware_cost_estimate": {
+        "gpu_hourly_cost": 0.50,
+        "tokens_per_hour": 10000000
+      }
+    }
+  },
+  "notes": [
+    "Ollama models are self-hosted with no per-token API costs",
+    "Hardware costs are estimates based on cloud GPU pricing",
+    "Actual costs depend on your hardware setup and electricity costs",
+    "For cost calculations, use hardware_cost_estimate to compute effective cost per token"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "provider": "azure",
+  "name": "Azure OpenAI",
+  "last_updated": "2026-03-31",
+  "currency": "USD",
+  "models": {
+    "gpt-4o": {
+      "input_cost_per_token": 0.0000025,
+      "output_cost_per_token": 0.000010,
+      "cache_read_cost_per_token": 0.00000125,
+      "max_tokens": 128000,
+      "description": "GPT-4o on Azure - Optimized for speed and cost"
+    },
+    "gpt-4o-mini": {
+      "input_cost_per_token": 0.00000015,
+      "output_cost_per_token": 0.0000006,
+      "cache_read_cost_per_token": 0.000000075,
+      "max_tokens": 128000,
+      "description": "GPT-4o Mini on Azure - Cost-effective option"
+    },
+    "gpt-4-turbo": {
+      "input_cost_per_token": 0.00001,
+      "output_cost_per_token": 0.00003,
+      "cache_read_cost_per_token": 0.000005,
+      "max_tokens": 128000,
+      "description": "GPT-4 Turbo on Azure - Enhanced performance"
+    },
+    "gpt-4": {
+      "input_cost_per_token": 0.00003,
+      "output_cost_per_token": 0.00006,
+      "cache_read_cost_per_token": 0.000015,
+      "max_tokens": 8192,
+      "description": "GPT-4 on Azure - Original flagship model"
+    },
+    "gpt-35-turbo": {
+      "input_cost_per_token": 0.0000005,
+      "output_cost_per_token": 0.0000015,
+      "cache_read_cost_per_token": 0.00000025,
+      "max_tokens": 16385,
+      "description": "GPT-3.5 Turbo on Azure - Fast and economical"
+    },
+    "o1": {
+      "input_cost_per_token": 0.000015,
+      "output_cost_per_token": 0.00006,
+      "cache_read_cost_per_token": 0.0000075,
+      "max_tokens": 200000,
+      "description": "O1 on Azure - Reasoning model"
+    },
+    "o1-mini": {
+      "input_cost_per_token": 0.0000011,
+      "output_cost_per_token": 0.0000044,
+      "cache_read_cost_per_token": 0.00000055,
+      "max_tokens": 128000,
+      "description": "O1 Mini on Azure - Compact reasoning model"
+    },
+    "text-embedding-ada-002": {
+      "input_cost_per_token": 0.0000001,
+      "output_cost_per_token": 0,
+      "max_tokens": 8191,
+      "description": "Text Embedding Ada 002 on Azure"
+    }
+  }
+}

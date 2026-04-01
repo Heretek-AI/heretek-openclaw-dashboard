@@ -1,0 +1,117 @@
+# ==============================================================================
+# Heretek OpenClaw Health Dashboard Configuration
+# ==============================================================================
+# Version: 1.0.0
+# Last Updated: 2026-03-31
+# ==============================================================================
+
+# Dashboard Settings
+dashboard:
+  name: "OpenClaw Health Dashboard"
+  version: "1.0.0"
+  refresh_interval: 30000  # 30 seconds
+  
+# Server Configuration
+server:
+  port: 18790
+  host: "0.0.0.0"
+
+# Service Endpoints
+services:
+  gateway:
+    url: "http://gateway:18789"
+    health_endpoint: "/health"
+  litellm:
+    url: "http://litellm:4000"
+    health_endpoint: "/health"
+    metrics_endpoint: "/metrics"
+    api_endpoint: "/spend"
+  postgres:
+    host: "postgres"
+    port: 5432
+    user: "heretek"
+    database: "heretek"
+  redis:
+    host: "redis"
+    port: 6379
+  ollama:
+    url: "http://ollama:11434"
+    models_endpoint: "/api/tags"
+  langfuse:
+    url: "http://langfuse:3000"
+    health_endpoint: "/api/health"
+  neo4j:
+    url: "bolt://neo4j:7687"
+    user: "neo4j"
+
+# LiteLLM Integration
+litellm:
+  enabled: true
+  url: "http://litellm:4000"
+  master_key_env: "LITELLM_MASTER_KEY"
+  collection_interval: 30000  # 30 seconds
+  
+  # Metrics to collect
+  metrics:
+    - spend
+    - tokens
+    - latency
+    - request_counts
+    - budget_status
+    - cost_by_model
+    - cost_by_agent
+
+# Alert Configuration
+alerts:
+  enabled: true
+  
+  # Thresholds
+  thresholds:
+    budget_warning: 80      # 80% of budget
+    budget_critical: 100    # 100% of budget
+    latency_warning: 5000   # 5 seconds (ms)
+    latency_critical: 10000 # 10 seconds (ms)
+    error_rate_warning: 5   # 5%
+    error_rate_critical: 10 # 10%
+    
+  # Notification channels (future expansion)
+  notifications:
+    - type: "dashboard"
+      enabled: true
+    - type: "webhook"
+      enabled: false
+      url: ""
+
+# UI Configuration
+ui:
+  # Components to display
+  components:
+    - service_status
+    - agent_status
+    - litellm_metrics
+    - model_usage
+    - budget_status
+    - langfuse_metrics
+    - resource_graphs
+    - memory_explorer
+    - session_tracking
+    - a2a_communication
+    - deliberation_tracking
+    - cron_jobs
+    - skill_plugin_tracker
+    - alert_panel
+
+# Data Collection
+collectors:
+  service_collector:
+    enabled: true
+    interval: 30000
+  agent_collector:
+    enabled: true
+    interval: 30000
+  resource_collector:
+    enabled: true
+    interval: 60000
+  litellm_metrics_collector:
+    enabled: true
+    interval: 30000
