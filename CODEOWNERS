@@ -1,0 +1,52 @@
+# Heretek OpenClaw CODEOWNERS
+# https://help.github.com/en/github/creating-cloning-and-archiving-repositories/about-code-owners
+
+# This file defines who is responsible for code reviews in this repository.
+# Each line specifies a path pattern and the users/groups responsible for it.
+
+# Format:
+# <path-pattern> <owner1> <owner2> ...
+
+# Default owners for the entire repository
+* @heretek/dashboard-team
+
+# Core team has ownership of all code
+/src/ @heretek/dashboard-team
+
+# Agent-specific ownership
+/src/agents/ @heretek/dashboard-team
+/src/agents/steward/ @heretek/dashboard-team
+/src/agents/explorer/ @heretek/dashboard-team
+/src/agents/sentinel/ @heretek/dashboard-team
+
+# Skills ownership
+/src/skills/ @heretek/dashboard-team
+/src/skills/triad-* @heretek/dashboard-team
+/src/skills/memory-* @heretek/dashboard-team
+
+# Plugin ownership
+/plugins/ @heretek/dashboard-team
+/plugins/consciousness/ @heretek/dashboard-team
+/plugins/liberation/ @heretek/dashboard-team
+
+# Test ownership
+/tests/ @heretek/dashboard-team
+/tests/unit/ @heretek/dashboard-team
+/tests/integration/ @heretek/dashboard-team
+/tests/e2e/ @heretek/dashboard-team
+
+# Configuration ownership
+/openclaw.json @heretek/dashboard-team
+/package.json @heretek/dashboard-team
+
+# Documentation ownership
+/docs/ @heretek/dashboard-team
+/README.md @heretek/dashboard-team
+
+# Infrastructure ownership
+/Dockerfile @heretek/dashboard-team
+/docker-compose.yml @heretek/dashboard-team
+/deploy/ @heretek/dashboard-team
+
+# CI/CD ownership
+.github/workflows/ @heretek/dashboard-team
