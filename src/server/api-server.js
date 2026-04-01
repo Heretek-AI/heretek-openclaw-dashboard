@@ -119,6 +119,9 @@ class ApiServer extends EventEmitter {
             costByModel: new Map(),
             tokenUsage: { total: 0, byAgent: new Map() }
         };
+        
+        // Task state machine store
+        this.tasks = new Map();
 
         // Route handlers
         this.routes = {
@@ -131,6 +134,11 @@ class ApiServer extends EventEmitter {
             'GET /api/metrics/summary': this.getMetricsSummary.bind(this),
             'GET /api/metrics/cost': this.getCostMetrics.bind(this),
             'GET /api/consciousness/:sessionId': this.getConsciousnessMetrics.bind(this),
+            'GET /api/tasks': this.getTasks.bind(this),
+            'GET /api/tasks/:id': this.getTask.bind(this),
+            'PUT /api/tasks/:id/stage': this.updateTaskStage.bind(this),
+            'POST /api/tasks': this.createTask.bind(this),
+            'DELETE /api/tasks/:id': this.deleteTask.bind(this),
             'GET /health': this.getHealth.bind(this),
             'GET /': this.getRoot.bind(this)
         };
@@ -675,8 +683,144 @@ class ApiServer extends EventEmitter {
             agents: this.agents.size,
             triadStates: this.triadStates.size,
             consensusEntries: this.consensusHistory.length,
+            tasks: this.tasks.size,
             uptime: process.uptime()
         };
+    }
+
+    // ==============================================================================
+    // Task State Machine API Endpoints
+    // ==============================================================================
+
+    /**
+     * GET /api/tasks - List all tasks
+     * @private
+     */
+    async getTasks(req, res) {
+        const tasksList = Array.from(this.tasks.values());
+        
+        this._sendJson(res, {
+            timestamp: new Date().toISOString(),
+            total: tasksList.length,
+            tasks: tasksList
+        });
+    }
+
+    /**
+     * GET /api/tasks/:id - Single task details
+     * @private
+     */
+    async getTask(req, res, params) {
+        const task = this.tasks.get(params.id);
+        
+        if (!task) {
+            this._sendError(res, new Error(`Task ${params.id} not found`), 404);
+            return;
+        }
+
+        this._sendJson(res, {
+            timestamp: new Date().toISOString(),
+            task
+        });
+    }
+
+    /**
+     * PUT /api/tasks/:id/stage - Update task stage (state machine transition)
+     * @private
+     */
+    async updateTaskStage(req, res, params) {
+        const task = this.tasks.get(params.id);
+        
+        if (!task) {
+            this._sendError(res, new Error(`Task ${params.id} not found`), 404);
+            return;
+        }
+
+        const { stage } = req.body;
+        const validStages = ['proposal', 'deliberation', 'review', 'execution', 'archive'];
+        
+        if (!stage || !validStages.includes(stage)) {
+            this._sendError(res, new Error(`Invalid stage. Must be one of: ${validStages.join(', ')}`), 400);
+            return;
+        }
+
+        // Validate state transition (optional business logic)
+        const stageOrder = validStages;
+        const currentIndex = stageOrder.indexOf(task.stage);
+        const newIndex = stageOrder.indexOf(stage);
+        
+        // Allow moving forward or backward by one stage at a time
+        if (Math.abs(newIndex - currentIndex) > 1) {
+            this._sendError(res, new Error('Cannot skip stages. Move one stage at a time.'), 400);
+            return;
+        }
+
+        task.stage = stage;
+        task.updatedAt = new Date().toISOString();
+        
+        // Emit update event for WebSocket broadcast
+        this.emit('task-update', { type: 'task-update', taskId: task.id, stage });
+        
+        this._sendJson(res, {
+            timestamp: new Date().toISOString(),
+            task
+        });
+    }
+
+    /**
+     * POST /api/tasks - Create new task
+     * @private
+     */
+    async createTask(req, res) {
+        const { title, description, priority, assignee, dueDate, tags } = req.body;
+        
+        if (!title) {
+            this._sendError(res, new Error('Title is required'), 400);
+            return;
+        }
+
+        const task = {
+            id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            title,
+            description: description || '',
+            stage: 'proposal',
+            priority: priority || 'medium',
+            assignee: assignee || null,
+            dueDate: dueDate || null,
+            tags: tags || [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        this.tasks.set(task.id, task);
+        this.emit('task-update', { type: 'task-update', taskId: task.id, action: 'created' });
+        
+        this._sendJson(res, {
+            timestamp: new Date().toISOString(),
+            task
+        }, 201);
+    }
+
+    /**
+     * DELETE /api/tasks/:id - Delete task
+     * @private
+     */
+    async deleteTask(req, res, params) {
+        const task = this.tasks.get(params.id);
+        
+        if (!task) {
+            this._sendError(res, new Error(`Task ${params.id} not found`), 404);
+            return;
+        }
+
+        this.tasks.delete(params.id);
+        this.emit('task-update', { type: 'task-update', taskId: params.id, action: 'deleted' });
+        
+        this._sendJson(res, {
+            timestamp: new Date().toISOString(),
+            success: true,
+            deletedTaskId: params.id
+        });
     }
 }
 

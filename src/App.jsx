@@ -6,6 +6,7 @@ import LiberationAudit from './components/LiberationAudit';
 import CuriosityFeed from './components/CuriosityFeed';
 import HistorianView from './components/HistorianView';
 import TokenEconomy from './components/TokenEconomy';
+import TaskKanban from './components/TaskKanban';
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -16,6 +17,7 @@ const TABS = [
   { id: 'curiosity', label: 'Curiosity' },
   { id: 'historian', label: 'Historian' },
   { id: 'tokens', label: 'Tokens' },
+  { id: 'tasks', label: 'Tasks' },
 ];
 
 export default function App() {
@@ -84,6 +86,8 @@ export default function App() {
         return <HistorianView consolidations={data?.historian} />;
       case 'tokens':
         return <TokenEconomy data={data?.tokens} full />;
+      case 'tasks':
+        return <TaskKanban full />;
       default:
         return null;
     }
