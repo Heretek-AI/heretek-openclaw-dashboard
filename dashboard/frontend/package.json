@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-health-dashboard",
+  "name": "@heretek/openclaw-dashboard-frontend",
   "version": "1.0.0",
   "description": "Heretek OpenClaw Health Check Dashboard",
   "private": true,
@@ -33,5 +33,9 @@
     "tailwindcss": "^3.4.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/heretek/heretek-openclaw-dashboard.git"
   }
 }
