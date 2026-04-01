@@ -153,7 +153,7 @@ scrape_configs:
     static_configs:
       - targets:
           - http://litellm:4000/health
-          - http://langfuse:3000/api/health
+          - http://langfuse:3000/
           - http://ollama:11434/
         labels:
           probe_type: 'http'
