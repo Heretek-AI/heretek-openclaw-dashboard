@@ -23,7 +23,8 @@ const AlertManager = require('../collectors/alert-manager');
  */
 class HealthApiServer {
   constructor(options = {}) {
-    this.port = options.port || 8080;
+    this.apiPort = options.apiPort || 8080;
+    this.frontendPort = options.frontendPort || 18790;
     this.host = options.host || '0.0.0.0';
     this.collectors = {
       agent: new AgentCollector(),
@@ -33,6 +34,7 @@ class HealthApiServer {
     };
     this.wss = null;
     this.server = null;
+    this.frontendServer = null;
     this.updateInterval = options.updateInterval || 5000;
     this.updateTimer = null;
     this.lastHealthData = null;
@@ -43,7 +45,8 @@ class HealthApiServer {
    * Start the health API server
    */
   async start() {
-    console.log(`[HealthAPI] Starting Health Check Dashboard API on port ${this.port}`);
+    console.log(`[HealthAPI] Starting Health Check Dashboard API on port ${this.apiPort}`);
+    console.log(`[HealthAPI] Starting Frontend Server on port ${this.frontendPort}`);
 
     // Initialize collectors
     await this.collectors.agent.initialize();
@@ -51,27 +54,41 @@ class HealthApiServer {
     await this.collectors.resource.initialize();
     await this.collectors.alert.initialize();
 
-    // Create HTTP server
+    // Create HTTP server for API
     this.server = http.createServer(this.handleRequest.bind(this));
 
     // Create WebSocket server
     this.wss = new WebSocket.Server({ server: this.server, path: '/ws' });
     this.wss.on('connection', this.handleWebSocketConnection.bind(this));
 
+    // Create frontend server (serves static HTML dashboard)
+    this.frontendServer = http.createServer(this.handleFrontendRequest.bind(this));
+
     // Start periodic health data collection
     this.startPeriodicCollection();
 
-    // Start server
-    return new Promise((resolve, reject) => {
-      this.server.listen(this.port, this.host, (err) => {
-        if (err) reject(err);
-        else {
-          console.log(`[HealthAPI] Server running at http://${this.host}:${this.port}`);
-          console.log(`[HealthAPI] WebSocket endpoint at ws://${this.host}:${this.port}/ws`);
-          resolve();
-        }
-      });
-    });
+    // Start both servers
+    return Promise.all([
+      new Promise((resolve, reject) => {
+        this.server.listen(this.apiPort, this.host, (err) => {
+          if (err) reject(err);
+          else {
+            console.log(`[HealthAPI] API Server running at http://${this.host}:${this.apiPort}`);
+            console.log(`[HealthAPI] WebSocket endpoint at ws://${this.host}:${this.apiPort}/ws`);
+            resolve();
+          }
+        });
+      }),
+      new Promise((resolve, reject) => {
+        this.frontendServer.listen(this.frontendPort, this.host, (err) => {
+          if (err) reject(err);
+          else {
+            console.log(`[HealthAPI] Frontend Server running at http://${this.host}:${this.frontendPort}`);
+            resolve();
+          }
+        });
+      })
+    ]);
   }
 
   /**
@@ -92,9 +109,14 @@ class HealthApiServer {
       await new Promise(resolve => this.wss.close(resolve));
     }
 
-    // Close HTTP server
+    // Close API HTTP server
     if (this.server) {
       await new Promise(resolve => this.server.close(resolve));
+    }
+
+    // Close Frontend HTTP server
+    if (this.frontendServer) {
+      await new Promise(resolve => this.frontendServer.close(resolve));
     }
 
     // Cleanup collectors
@@ -339,6 +361,31 @@ class HealthApiServer {
       console.error('[HealthAPI] WebSocket error:', error);
     });
   }
+
+  handleFrontendRequest(req, res) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
+
+    // API routes should be handled by the API server, but catch them here too for simplicity
+    if (pathname.startsWith('/api/')) {
+      this.handleRequest(req, res);
+      return;
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'text/html');
+    if (pathname === '/' || pathname === '/index.html' || pathname === '/health') {
+      res.writeHead(200);
+      res.end(`<!DOCTYPE html><html><head><title>Heretek Dashboard</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;min-height:100vh;padding:20px}.container{max-width:1200px;margin:0 auto}h1{margin-bottom:20px}pre{background:#1a1a2e;padding:15px;border-radius:8px;overflow-x:auto;margin-top:15px}button{padding:10px 20px;background:#4a6fa5;color:white;border:none;border-radius:5px;cursor:pointer;margin:5px}</style></head>
+<body><div class="container"><h1>Heretek Control Dashboard</h1><div id="status">Loading...</div>
+<button onclick="loadHealth()">Refresh</button></div>
+<script>async function loadHealth(){try{const r=await fetch('/api/health');const d=await r.json();document.getElementById('status').innerHTML='<pre>'+JSON.stringify(d.summary,null,2)+'</pre>';}catch(e){document.getElementById('status').innerHTML='Error: '+e.message;}}loadHealth();setInterval(loadHealth,30000);</script></body></html>`);
+    } else {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  }
 }
 
 // Export for use as module
@@ -347,7 +394,8 @@ module.exports = HealthApiServer;
 // Run as standalone server
 if (require.main === module) {
   const server = new HealthApiServer({
-    port: process.env.HEALTH_API_PORT || 8080,
+    apiPort: parseInt(process.env.HEALTH_API_PORT) || 8080,
+    frontendPort: parseInt(process.env.DASHBOARD_PORT) || 18790,
     host: process.env.HEALTH_API_HOST || '0.0.0.0',
     updateInterval: parseInt(process.env.HEALTH_API_INTERVAL) || 5000,
     prometheusUrl: process.env.PROMETHEUS_URL || 'http://localhost:9090'
