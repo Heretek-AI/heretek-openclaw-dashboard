@@ -11,6 +11,7 @@
 const http = require('http');
 const WebSocket = require('ws');
 const { URL } = require('url');
+const { Pool } = require('pg');
 
 // Import collectors
 const AgentCollector = require('../collectors/agent-collector');
@@ -26,6 +27,16 @@ class HealthApiServer {
     this.apiPort = options.apiPort || 8080;
     this.frontendPort = options.frontendPort || 18790;
     this.host = options.host || '0.0.0.0';
+    this.pgPool = null;
+    // PostgreSQL connection — set DATABASE_URL env var or pass pgConfig option
+    if (process.env.DATABASE_URL || options.pgConfig) {
+      this.pgPool = new Pool(
+        options.pgConfig || { connectionString: process.env.DATABASE_URL }
+      );
+      this.pgPool.on('error', err => {
+        console.error('[HealthAPI/PostgreSQL] Unexpected client error:', err.message);
+      });
+    }
     this.collectors = {
       agent: new AgentCollector(),
       service: new ServiceCollector(),
@@ -246,6 +257,8 @@ class HealthApiServer {
     const routes = {
       'GET /api/health': () => this.getHealth(),
       'GET /api/memory/graph': () => this.getMemoryGraph(),
+      'GET /api/a2a/live': () => this.getA2ALive(url),
+      'GET /api/a2a/history': () => this.getA2AHistory(url),
       'GET /api/health/agents': () => this.collectors.agent.collect(),
       'GET /api/health/services': () => this.collectors.service.collect(),
       'GET /api/health/resources': () => this.collectors.resource.collect(),
@@ -527,6 +540,141 @@ class HealthApiServer {
       nodes,
       edges,
     };
+  }
+
+  // ==============================================================================
+  // A2A Message Log Endpoints
+  // ==============================================================================
+
+  /**
+   * GET /api/a2a/live — Returns the last N A2A message events from PostgreSQL.
+   * Returns an empty array until the gateway interception layer is wired.
+   * @private
+   */
+  async getA2ALive(url) {
+    if (!this.pgPool) {
+      return {
+        messages: [],
+        total: 0,
+        oldest: null,
+        newest: null,
+        logged_at: new Date().toISOString(),
+        _note: 'PostgreSQL not configured — set DATABASE_URL env var. See A2A_CHANNEL_PLUGIN_SPEC.md.',
+      };
+    }
+
+    const limit = Math.min(
+      parseInt(url.searchParams.get('limit') || '50', 10),
+      200
+    );
+    const since = url.searchParams.get('since') || null;
+
+    try {
+      const params = [limit];
+      let where = '';
+      if (since) {
+        where = 'WHERE logged_at > $2';
+        params.push(since);
+      }
+
+      const result = await this.pgPool.query(
+        `SELECT id, logged_at, from_agent, to_agent, message_type,
+                payload_summary, session_key, routed_via
+           FROM a2a_messages
+           ${where}
+           ORDER BY logged_at DESC
+           LIMIT $1`,
+        params
+      );
+
+      const rows = result.rows;
+      return {
+        messages: rows,
+        total: rows.length,
+        oldest: rows.length > 0 ? rows[rows.length - 1].logged_at : null,
+        newest: rows.length > 0 ? rows[0].logged_at : null,
+        logged_at: new Date().toISOString(),
+      };
+    } catch (err) {
+      console.error('[HealthAPI] getA2ALive error:', err.message);
+      return {
+        messages: [],
+        total: 0,
+        oldest: null,
+        newest: null,
+        logged_at: new Date().toISOString(),
+        error: err.message,
+      };
+    }
+  }
+
+  /**
+   * GET /api/a2a/history — Returns historical A2A messages with filtering.
+   * @private
+   */
+  async getA2AHistory(url) {
+    if (!this.pgPool) {
+      return {
+        messages: [],
+        total: 0,
+        offset: 0,
+        _note: 'PostgreSQL not configured — set DATABASE_URL env var.',
+      };
+    }
+
+    const fromAgent   = url.searchParams.get('from')   || null;
+    const toAgent     = url.searchParams.get('to')     || null;
+    const messageType = url.searchParams.get('type')  || null;
+    const since       = url.searchParams.get('since')  || null;
+    const until       = url.searchParams.get('until')  || null;
+    const limit       = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 500);
+    const offset      = parseInt(url.searchParams.get('offset') || '0', 10);
+
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
+
+    if (fromAgent)   { conditions.push(`from_agent   = $${paramIdx++}`); params.push(fromAgent); }
+    if (toAgent)     { conditions.push(`to_agent     = $${paramIdx++}`); params.push(toAgent); }
+    if (messageType) { conditions.push(`message_type = $${paramIdx++}`); params.push(messageType); }
+    if (since)       { conditions.push(`logged_at    > $${paramIdx++}`); params.push(since); }
+    if (until)       { conditions.push(`logged_at    < $${paramIdx++}`); params.push(until); }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    try {
+      const [dataResult, countResult] = await Promise.all([
+        this.pgPool.query(
+          `SELECT id, logged_at, from_agent, to_agent, message_type,
+                  payload_summary, session_key, routed_via
+             FROM a2a_messages
+             ${where}
+             ORDER BY logged_at DESC
+             LIMIT $${paramIdx++} OFFSET $${paramIdx}`,
+          [...params, limit, offset]
+        ),
+        this.pgPool.query(
+          `SELECT COUNT(*) as total FROM a2a_messages ${where}`,
+          params
+        ),
+      ]);
+
+      return {
+        messages:   dataResult.rows,
+        total:      parseInt(countResult.rows[0].total, 10),
+        limit,
+        offset,
+        logged_at:  new Date().toISOString(),
+      };
+    } catch (err) {
+      console.error('[HealthAPI] getA2AHistory error:', err.message);
+      return {
+        messages: [],
+        total: 0,
+        offset,
+        error: err.message,
+      };
+    }
   }
 
   /**
