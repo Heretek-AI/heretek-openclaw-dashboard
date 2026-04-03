@@ -39,7 +39,10 @@ services:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
       
       # Service Endpoints
-      - GATEWAY_URL=${GATEWAY_URL:-http://gateway:18789}
+      # NOTE: Gateway runs as a host process (not container). Inside the dashboard
+      # container, reach it at http://172.17.0.1:18789 (host docker0 bridge).
+      # Do NOT use 'gateway:18789' — that DNS only works for container-to-container.
+      - GATEWAY_URL=${GATEWAY_URL:-http://172.17.0.1:18789}
       - LANGFUSE_URL=${LANGFUSE_URL:-http://langfuse:3000}
       - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
