@@ -1,20 +1,32 @@
 /**
  * Heretek OpenClaw Health Check Dashboard - Agent Collector
- * 
- * Collects health data for all agents in the OpenClaw system
- * 
- * @version 1.0.0
+ *
+ * Collects health data for all agents in the OpenClaw system.
+ * Uses `openclaw sessions list` and filesystem reads to get live agent data.
+ *
+ * @version 2.0.0
  */
 
 const http = require('http');
 const https = require('https');
+const { execSync, exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Agent workspace base directory
+const AGENT_WORKSPACE_BASE = '/root/.openclaw/agents';
 
 class AgentCollector {
   constructor(options = {}) {
     this.gatewayUrl = options.gatewayUrl || 'http://localhost:18789';
+    this.hostGatewayUrl = options.hostGatewayUrl || 'http://172.17.0.1:18789';
     this.timeout = options.timeout || 5000;
     this.agents = [];
     this.initialized = false;
+    // Cache session data to avoid hammering openclaw
+    this._sessionCache = null;
+    this._sessionCacheTime = 0;
+    this._sessionCacheTTL = 3000; // 3 seconds
   }
 
   /**
@@ -22,13 +34,11 @@ class AgentCollector {
    */
   async initialize() {
     try {
-      // Fetch agent list from Gateway
       this.agents = await this.fetchAgentList();
       this.initialized = true;
       console.log(`[AgentCollector] Initialized with ${this.agents.length} agents`);
     } catch (error) {
       console.error('[AgentCollector] Failed to initialize:', error.message);
-      // Use default agent list as fallback
       this.agents = this.getDefaultAgents();
       this.initialized = true;
     }
@@ -40,171 +50,440 @@ class AgentCollector {
   async cleanup() {
     this.agents = [];
     this.initialized = false;
+    this._sessionCache = null;
   }
 
   /**
-   * Collect agent health data
+   * Get sessions list (cached)
    */
-  async collect() {
-    const agentHealth = [];
-
-    for (const agent of this.agents) {
+  _getSessionsCached() {
+    const now = Date.now();
+    if (this._sessionCache && (now - this._sessionCacheTime) < this._sessionCacheTTL) {
+      return this._sessionCache;
+    }
+    try {
+      const out = execSync('openclaw sessions list --json 2>/dev/null', {
+        timeout: 3000,
+        encoding: 'utf8',
+        maxBuffer: 512 * 1024,
+      });
+      this._sessionCache = JSON.parse(out);
+      this._sessionCacheTime = now;
+      return this._sessionCache;
+    } catch (err) {
+      // Fallback: try plain text output
       try {
-        const health = await this.getAgentHealth(agent);
-        agentHealth.push(health);
-      } catch (error) {
-        agentHealth.push({
-          id: agent.id,
-          name: agent.name,
-          role: agent.role,
-          status: 'error',
-          error: error.message,
-          lastHeartbeat: null,
-          currentTask: null,
-          model: null,
-          tokenUsage: { session: 0, daily: 0 }
+        const out = execSync('openclaw sessions list 2>/dev/null', {
+          timeout: 3000,
+          encoding: 'utf8',
+          maxBuffer: 512 * 1024,
         });
+        this._sessionCache = this._parseTextSessions(out);
+        this._sessionCacheTime = now;
+        return this._sessionCache;
+      } catch (_) {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Parse plain text sessions output into structured format
+   */
+  _parseTextSessions(text) {
+    const sessions = [];
+    const lines = text.trim().split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      // Try to parse as JSON lines or structured text
+      try {
+        sessions.push(JSON.parse(trimmed));
+      } catch (_) {
+        // Try regex for "session_id | status | ..." format
+        const parts = trimmed.split(/\s*[|]\s*/);
+        if (parts.length >= 2) {
+          sessions.push({
+            id: parts[0].trim(),
+            status: parts[1].trim(),
+            lastActivity: parts[2]?.trim() || null,
+            model: parts[3]?.trim() || null,
+          });
+        }
+      }
+    }
+    return sessions;
+  }
+
+  /**
+   * Get agents list from openclaw CLI (cached)
+   */
+  _getAgentsListCached() {
+    try {
+      const out = execSync('openclaw agents list --json 2>/dev/null', {
+        timeout: 3000,
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024,
+      });
+      return JSON.parse(out);
+    } catch (_) {
+      try {
+        const out = execSync('openclaw agents list 2>/dev/null', {
+          timeout: 3000,
+          encoding: 'utf8',
+          maxBuffer: 256 * 1024,
+        });
+        return this._parseTextAgents(out);
+      } catch (_) {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Parse plain text agents output
+   */
+  _parseTextAgents(text) {
+    const agents = [];
+    const lines = text.trim().split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      try {
+        agents.push(JSON.parse(trimmed));
+      } catch (_) {
+        const parts = trimmed.split(/\s*[|]\s*/);
+        if (parts.length >= 2) {
+          agents.push({
+            name: parts[0].trim(),
+            role: parts[1].trim(),
+            status: parts[2]?.trim() || 'unknown',
+            model: parts[3]?.trim() || null,
+          });
+        }
+      }
+    }
+    return agents;
+  }
+
+  /**
+   * Read a file safely, returning null on failure
+   */
+  _readFile(filePath) {
+    try {
+      return fs.readFileSync(filePath, 'utf8');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Get agent workspace path
+   */
+  _getWorkspacePath(agentId) {
+    return path.join(AGENT_WORKSPACE_BASE, agentId, 'workspace');
+  }
+
+  /**
+   * Parse SOUL.md to extract agent metadata
+   */
+  _parseSoulMd(content) {
+    const result = {
+      name: null,
+      role: null,
+      emoji: '🤖',
+      description: null,
+    };
+
+    if (!content) return result;
+
+    // Extract name from "Name:" or "Steward" line
+    const nameMatch = content.match(/(?:\*\*Name:\*\*|Name\s*[-:]\s*)(.+)/i) ||
+                      content.match(/^#\s+SOUL\.md\s+[—–-]\s*(.+)/im) ||
+                      content.match(/^#\s+(.+)/m);
+    if (nameMatch) result.name = nameMatch[1].trim().replace(/[*_]/g, '');
+
+    // Extract role
+    const roleMatch = content.match(/(?:\*\*Role:\*\*|Role\s*[-:]\s*)(.+)/i);
+    if (roleMatch) result.role = roleMatch[1].trim().replace(/[*_]/g, '');
+
+    // Extract emoji (look for flag or dingbat patterns)
+    const emojiMatch = content.match(/([\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}])/u);
+    if (emojiMatch) result.emoji = emojiMatch[1];
+
+    // First non-heading, non-empty line as description
+    const lines = content.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith('*') && trimmed.length > 10) {
+        result.description = trimmed.replace(/[*_#]/g, '').slice(0, 120);
+        break;
       }
     }
 
-    return agentHealth;
+    return result;
   }
 
   /**
-   * Get health data for a specific agent
+   * Check if heartbeat file has content (indicates alive)
    */
-  async getAgentHealth(agent) {
-    const timeout = this.timeout;
-
-    const fetchWithTimeout = (url, options) => {
-      return new Promise((resolve, reject) => {
-        const protocol = url.startsWith('https') ? https : http;
-        const req = protocol.get(url, options, (res) => {
-          let data = '';
-          res.on('data', chunk => { data += chunk; });
-          res.on('end', () => {
-            try {
-              resolve(JSON.parse(data));
-            } catch (e) {
-              resolve({ raw: data });
-            }
-          });
-        });
-        req.on('error', reject);
-        req.setTimeout(timeout, () => {
-          req.destroy();
-          reject(new Error('Request timeout'));
-        });
-      });
-    };
-
-    // Try to get agent health from Gateway
+  _readHeartbeat(workspacePath) {
     try {
-      const healthData = await fetchWithTimeout(
-        `${this.gatewayUrl}/api/agents/${agent.id}/health`,
-        { timeout }
-      );
-
+      const hbPath = path.join(workspacePath, 'HEARTBEAT.md');
+      if (!fs.existsSync(hbPath)) return null;
+      const stat = fs.statSync(hbPath);
+      const content = fs.readFileSync(hbPath, 'utf8').trim();
+      if (!content) return null;
       return {
-        id: agent.id,
-        name: agent.name || healthData.name || agent.id,
-        role: agent.role || healthData.role || 'unknown',
-        emoji: agent.emoji || healthData.emoji || '🤖',
-        status: this.mapStatus(healthData.status),
-        lastHeartbeat: healthData.lastHeartbeat || healthData.last_heartbeat || null,
-        heartbeatAge: this.calculateHeartbeatAge(healthData.lastHeartbeat || healthData.last_heartbeat),
-        currentTask: healthData.currentTask || healthData.current_task || null,
-        model: healthData.model || healthData.current_model || null,
-        tokenUsage: {
-          session: healthData.tokenUsage?.session || healthData.session_tokens || 0,
-          daily: healthData.tokenUsage?.daily || healthData.daily_tokens || 0
-        },
-        memoryUsage: healthData.memoryUsage || healthData.memory_usage || null,
-        uptime: healthData.uptime || null,
-        error: healthData.error || null
+        lastHeartbeat: stat.mtime.toISOString(),
+        content,
       };
-    } catch (error) {
-      // If Gateway health endpoint fails, try WebSocket status
-      return {
-        id: agent.id,
-        name: agent.name || agent.id,
-        role: agent.role || 'unknown',
-        emoji: agent.emoji || '🤖',
-        status: 'unknown',
-        lastHeartbeat: null,
-        heartbeatAge: null,
-        currentTask: null,
-        model: null,
-        tokenUsage: { session: 0, daily: 0 },
-        error: error.message
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Get last activity time from session history (filesystem-based)
+   */
+  _getLastActivity(agentId) {
+    try {
+      // Try session history files
+      const historyPath = path.join(AGENT_WORKSPACE_BASE, agentId, 'session_history.json');
+      if (fs.existsSync(historyPath)) {
+        const history = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+        if (Array.isArray(history) && history.length > 0) {
+          const last = history[history.length - 1];
+          return last.timestamp || last.time || last.date || null;
+        }
+      }
+
+      // Fall back to SOUL.md mtime as proxy for activity
+      const soulPath = path.join(AGENT_WORKSPACE_BASE, agentId, 'workspace', 'SOUL.md');
+      if (fs.existsSync(soulPath)) {
+        return fs.statSync(soulPath).mtime.toISOString();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /**
+   * Extract current task from session history or recent messages
+   */
+  _getCurrentTask(agentId) {
+    try {
+      const sessionDir = path.join(AGENT_WORKSPACE_BASE, agentId);
+      const files = ['session_history.json', 'current_task.txt', 'status.txt', 'last_message.txt'];
+      for (const file of files) {
+        const filePath = path.join(sessionDir, file);
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, 'utf8').trim();
+          if (content) {
+            // If JSON, try to extract a message field
+            try {
+              const parsed = JSON.parse(content);
+              if (typeof parsed === 'string') return parsed.slice(0, 100);
+              if (parsed.message) return parsed.message.slice(0, 100);
+              if (parsed.task) return parsed.task.slice(0, 100);
+              if (parsed.content) return parsed.content.slice(0, 100);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                const last = parsed[parsed.length - 1];
+                if (typeof last === 'string') return last.slice(0, 100);
+                if (last.message) return last.message.slice(0, 100);
+              }
+            } catch (_) {
+              return content.slice(0, 100);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /**
+   * Map session status to our status enum
+   */
+  _mapStatus(sessionStatus, hasHeartbeat) {
+    if (!sessionStatus) {
+      return hasHeartbeat ? 'idle' : 'unknown';
+    }
+    const s = sessionStatus.toLowerCase();
+    if (['active', 'running', 'processing'].includes(s)) return 'active';
+    if (['idle', 'waiting', 'standby', 'ready'].includes(s)) return 'idle';
+    if (['busy', 'task_running', 'deliberating'].includes(s)) return 'busy';
+    if (['error', 'failed', 'crashed', 'crash'].includes(s)) return 'error';
+    if (['offline', 'disconnected', 'stopped', 'terminated'].includes(s)) return 'offline';
+    return 'unknown';
+  }
+
+  /**
+   * Main collect method — gathers live data for all agents
+   */
+  async collect() {
+    // Pull live session data
+    const sessions = this._getSessionsCached();
+    const agentsList = this._getAgentsListCached();
+
+    // Build a session lookup: try both `id` and `name` keys
+    const sessionById = {};
+    const sessionByName = {};
+    for (const s of sessions) {
+      if (s.id) sessionById[s.id] = s;
+      if (s.name) sessionByName[s.name.toLowerCase()] = s;
+      // Also try 'agent:heretek:name' pattern
+      if (s.session_key) sessionById[s.session_key] = s;
+    }
+
+    // Build agents list lookup
+    const agentListByName = {};
+    for (const a of agentsList) {
+      if (a.name) agentListByName[a.name.toLowerCase()] = a;
+    }
+
+    const results = [];
+
+    for (const agent of this.agents) {
+      const agentId = agent.id;
+      const workspacePath = this._getWorkspacePath(agentId);
+
+      // ── 1. Session data ────────────────────────────────────────────────────
+      const session = sessionById[agentId] ||
+                      sessionById[`agent:heretek:${agentId}`] ||
+                      sessionByName[agentId.toLowerCase()] ||
+                      null;
+
+      // ── 2. SOUL.md ──────────────────────────────────────────────────────────
+      const soulPath = path.join(workspacePath, 'SOUL.md');
+      const soulContent = this._readFile(soulPath);
+      const soulMeta = this._parseSoulMd(soulContent);
+
+      // ── 3. Heartbeat ────────────────────────────────────────────────────────
+      const heartbeat = this._readHeartbeat(workspacePath);
+
+      // ── 4. Last activity ────────────────────────────────────────────────────
+      const lastActivity = this._getLastActivity(agentId);
+      const currentTask = this._getCurrentTask(agentId);
+
+      // ── 5. Determine status ──────────────────────────────────────────────────
+      const sessionStatus = session?.status || null;
+      const hasHeartbeat = !!heartbeat;
+      let status = this._mapStatus(sessionStatus, hasHeartbeat);
+
+      // Override to error if session says error
+      if (sessionStatus && sessionStatus.toLowerCase() === 'error') {
+        status = 'error';
+      }
+
+      // ── 6. Determine model ──────────────────────────────────────────────────
+      let model = agent.model ||
+                  (session ? (session.model || session.current_model || session.ai_model) : null) ||
+                  (agentListByName[agentId.toLowerCase()]?.model) ||
+                  null;
+
+      // ── 7. Determine role ───────────────────────────────────────────────────
+      let role = soulMeta.role ||
+                 agent.role ||
+                 (agentListByName[agentId.toLowerCase()]?.role) ||
+                 null;
+
+      // ── 8. Determine emoji ─────────────────────────────────────────────────
+      let emoji = soulMeta.emoji || agent.emoji || '🤖';
+
+      // ── 9. Determine last heartbeat time ────────────────────────────────────
+      let lastHeartbeat = null;
+      if (heartbeat) {
+        lastHeartbeat = heartbeat.lastHeartbeat;
+      } else if (session?.last_heartbeat || session?.lastHeartbeat) {
+        lastHeartbeat = session.last_heartbeat || session.lastHeartbeat;
+      } else if (lastActivity) {
+        lastHeartbeat = lastActivity;
+      } else if (fs.existsSync(soulPath)) {
+        lastHeartbeat = fs.statSync(soulPath).mtime.toISOString();
+      }
+
+      // ── 10. Calculate heartbeat age ─────────────────────────────────────────
+      const heartbeatAge = lastHeartbeat
+        ? Math.round((Date.now() - new Date(lastHeartbeat).getTime()) / 1000)
+        : null;
+
+      // ── 11. Token usage ──────────────────────────────────────────────────────
+      const tokenUsage = {
+        session: session?.session_tokens || session?.tokens_session || 0,
+        daily: session?.daily_tokens || session?.tokens_daily || 0,
       };
+
+      // ── 12. Error from session ───────────────────────────────────────────────
+      const error = session?.error || session?.error_message || null;
+
+      results.push({
+        id: agentId,
+        name: soulMeta.name || agent.name || agentId,
+        role: role || agent.role || 'Agent',
+        emoji,
+        status,
+        lastHeartbeat,
+        heartbeatAge,
+        currentTask: currentTask || session?.current_task || session?.task || null,
+        model: model || null,
+        tokenUsage,
+        memoryUsage: session?.memory_usage || session?.memoryUsage || null,
+        uptime: session?.uptime || null,
+        error,
+        // Raw session for debugging
+        _sessionStatus: sessionStatus,
+        _hasHeartbeat: hasHeartbeat,
+      });
     }
+
+    return results;
   }
 
   /**
-   * Map status from various formats to standard format
-   */
-  mapStatus(status) {
-    if (!status) return 'unknown';
-    
-    const statusLower = status.toLowerCase();
-    
-    if (['active', 'online', 'running', 'ok', 'healthy'].includes(statusLower)) {
-      return 'active';
-    }
-    if (['idle', 'waiting', 'standby'].includes(statusLower)) {
-      return 'idle';
-    }
-    if (['busy', 'processing', 'working', 'task_running'].includes(statusLower)) {
-      return 'busy';
-    }
-    if (['error', 'failed', 'down', 'unhealthy'].includes(statusLower)) {
-      return 'error';
-    }
-    if (['offline', 'disconnected', 'stopped'].includes(statusLower)) {
-      return 'offline';
-    }
-    
-    return statusLower;
-  }
-
-  /**
-   * Calculate heartbeat age in seconds
-   */
-  calculateHeartbeatAge(lastHeartbeat) {
-    if (!lastHeartbeat) return null;
-    
-    const lastTime = new Date(lastHeartbeat);
-    const now = new Date();
-    const ageMs = now - lastTime;
-    
-    return Math.round(ageMs / 1000);
-  }
-
-  /**
-   * Fetch agent list from Gateway
+   * Fetch agent list — try CLI first, then workspace scan, then defaults
    */
   async fetchAgentList() {
-    return new Promise((resolve, reject) => {
-      http.get(`${this.gatewayUrl}/api/agents`, { timeout: this.timeout }, (res) => {
-        let data = '';
-        res.on('data', chunk => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const agents = JSON.parse(data);
-            if (Array.isArray(agents)) {
-              resolve(agents);
-            } else if (agents.agents && Array.isArray(agents.agents)) {
-              resolve(agents.agents);
-            } else {
-              resolve(this.getDefaultAgents());
-            }
-          } catch (e) {
-            resolve(this.getDefaultAgents());
-          }
-        });
-      }).on('error', reject);
-    });
+    // Try CLI
+    const agentsList = this._getAgentsListCached();
+    if (Array.isArray(agentsList) && agentsList.length > 0) {
+      return agentsList.map(a => ({
+        id: a.name?.toLowerCase() || a.id || a.agent_id || 'unknown',
+        name: a.name || a.id || 'Unknown',
+        role: a.role || null,
+        emoji: a.emoji || null,
+        model: a.model || null,
+      }));
+    }
+
+    // Scan workspace directories
+    try {
+      if (fs.existsSync(AGENT_WORKSPACE_BASE)) {
+        const dirs = fs.readdirSync(AGENT_WORKSPACE_BASE);
+        const workspaceAgents = dirs
+          .filter(d => {
+            try {
+              return fs.statSync(path.join(AGENT_WORKSPACE_BASE, d)).isDirectory();
+            } catch (_) { return false; }
+          })
+          .map(d => {
+            const soulPath = path.join(AGENT_WORKSPACE_BASE, d, 'workspace', 'SOUL.md');
+            const soulMeta = this._parseSoulMd(this._readFile(soulPath));
+            return {
+              id: d,
+              name: soulMeta.name || d,
+              role: soulMeta.role || null,
+              emoji: soulMeta.emoji || null,
+            };
+          });
+
+        if (workspaceAgents.length > 0) {
+          return workspaceAgents;
+        }
+      }
+    } catch (_) {}
+
+    // Fallback to defaults
+    return this.getDefaultAgents();
   }
 
   /**
@@ -212,17 +491,17 @@ class AgentCollector {
    */
   getDefaultAgents() {
     return [
-      { id: 'steward', name: 'Steward', role: 'Coordinator', emoji: '👨‍💼' },
-      { id: 'alpha', name: 'Alpha', role: 'Triad Node A', emoji: '🔺' },
-      { id: 'beta', name: 'Beta', role: 'Triad Node B', emoji: '🔷' },
-      { id: 'charlie', name: 'Charlie', role: 'Triad Node C', emoji: '🔶' },
-      { id: 'examiner', name: 'Examiner', role: 'Quality Assurance', emoji: '🔍' },
-      { id: 'explorer', name: 'Explorer', role: 'Research', emoji: '🗺️' },
-      { id: 'sentinel', name: 'Sentinel', role: 'Security', emoji: '🛡️' },
-      { id: 'coder', name: 'Coder', role: 'Software Development', emoji: '👨‍💻' },
-      { id: 'dreamer', name: 'Dreamer', role: 'Creative', emoji: '💭' },
-      { id: 'empath', name: 'Empath', role: 'Emotional Intelligence', emoji: '💝' },
-      { id: 'historian', name: 'Historian', role: 'Memory & Context', emoji: '📚' }
+      { id: 'steward',   name: 'Steward',   role: 'Orchestrator',          emoji: '🦞' },
+      { id: 'alpha',     name: 'Alpha',     role: 'Triad Node A',          emoji: '🔺' },
+      { id: 'beta',      name: 'Beta',      role: 'Triad Node B',          emoji: '🔷' },
+      { id: 'charlie',   name: 'Charlie',  role: 'Triad Node C',          emoji: '🔶' },
+      { id: 'examiner',  name: 'Examiner',  role: 'Quality Assurance',     emoji: '🔍' },
+      { id: 'explorer',  name: 'Explorer',  role: 'Intelligence',           emoji: '🗺️' },
+      { id: 'sentinel',  name: 'Sentinel',  role: 'Security',               emoji: '🛡️' },
+      { id: 'coder',     name: 'Coder',     role: 'Software Development',  emoji: '👨‍💻' },
+      { id: 'dreamer',   name: 'Dreamer',  role: 'Creative',               emoji: '💭' },
+      { id: 'empath',   name: 'Empath',   role: 'Emotional Intelligence', emoji: '💝' },
+      { id: 'historian', name: 'Historian', role: 'Memory & Context',      emoji: '📚' },
     ];
   }
 }
