@@ -54,6 +54,10 @@ services:
     depends_on:
       - prometheus
       - grafana
+    volumes:
+      # Mount OpenClaw agent workspace into container for memory graph access
+      - /root/.openclaw/agents:/app/.openclaw/agents:ro
+      - /root/.openclaw/skills:/app/.openclaw/skills:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
       interval: 30s
