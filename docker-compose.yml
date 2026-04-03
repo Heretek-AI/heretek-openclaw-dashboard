@@ -56,6 +56,9 @@ services:
       - grafana
     volumes:
       # Mount OpenClaw agent workspace into container for memory graph access
+      # NOTE: /root/.openclaw/agents must be chmod 755+ on the host — container runs as
+      # non-root (appuser uid 1001) and needs world-traverse on the agents directory.
+      # /root/.openclaw/skills is already 755 by default. Check on reboot.
       - /root/.openclaw/agents:/app/.openclaw/agents:ro
       - /root/.openclaw/skills:/app/.openclaw/skills:ro
     healthcheck:

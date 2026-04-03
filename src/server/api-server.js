@@ -134,6 +134,7 @@ class ApiServer extends EventEmitter {
             'GET /api/metrics/summary': this.getMetricsSummary.bind(this),
             'GET /api/metrics/cost': this.getCostMetrics.bind(this),
             'GET /api/consciousness/:sessionId': this.getConsciousnessMetrics.bind(this),
+            'GET /api/memory/graph': this.getMemoryGraph.bind(this),
             'GET /api/tasks': this.getTasks.bind(this),
             'GET /api/tasks/:id': this.getTask.bind(this),
             'PUT /api/tasks/:id/stage': this.updateTaskStage.bind(this),
@@ -584,6 +585,210 @@ class ApiServer extends EventEmitter {
             timestamp: new Date().toISOString(),
             sessionId: params.sessionId,
             metrics
+        });
+    }
+
+    // ==============================================================================
+    // Memory Graph Endpoint
+    // ==============================================================================
+
+    /**
+     * Build the collective memory graph.
+     * Returns nodes (agents, skills, memory blocks) and edges (a2a, uses, depends_on).
+     * @private
+     */
+    _buildMemoryGraph() {
+        const fs = require('fs');
+        const path = require('path');
+
+        const nodes = [];
+        const edges = [];
+        const seenNode = (id) => nodes.some(n => n.id === id);
+        const addNode = (id, type, label, sublabel) => {
+            if (!seenNode(id)) nodes.push({ id, type, label, sublabel });
+        };
+        const addEdge = (source, target, type) => {
+            edges.push({ source, target, type });
+        };
+
+        // ── 1. AGENT NODES ────────────────────────────────────────────────────────
+        const agents = [
+            { id: 'steward',    label: 'Steward',    role: 'Orchestrator',     color: '#7B68EE' },
+            { id: 'alpha',      label: 'Alpha',      role: 'Triad — Node A',   color: '#4ECDC4' },
+            { id: 'beta',       label: 'Beta',       role: 'Triad — Node B',   color: '#4ECDC4' },
+            { id: 'charlie',    label: 'Charlie',    role: 'Triad — Node C',   color: '#4ECDC4' },
+            { id: 'sentinel',   label: 'Sentinel',   role: 'Safety Reviewer',  color: '#FF6B6B' },
+            { id: 'examiner',   label: 'Examiner',   role: 'Questioner',       color: '#FFE66D' },
+            { id: 'explorer',   label: 'Explorer',  role: 'Intelligence',     color: '#95E1D3' },
+            { id: 'coder',      label: 'Coder',      role: 'Implementation',   color: '#A8D8EA' },
+        ];
+
+        agents.forEach(a => {
+            addNode(a.id, 'agent', a.label, a.role);
+        });
+
+        // ── 2. SKILL NODES ────────────────────────────────────────────────────────
+        const globalSkillsDir = '/root/.openclaw/skills';
+        const stewardSkillsDir = '/root/.openclaw/agents/steward/workspace/skills';
+        const skillDirs = [globalSkillsDir, stewardSkillsDir];
+        const seenSkills = new Set();
+
+        skillDirs.forEach(dir => {
+            try {
+                const entries = fs.readdirSync(dir);
+                entries.forEach(name => {
+                    const skillId = `skill:${name}`;
+                    if (!seenSkills.has(skillId)) {
+                        seenSkills.add(skillId);
+                        addNode(skillId, 'skill', name, 'AgentSkill');
+                    }
+                });
+            } catch (_) {
+                // Directory may not exist in all deployments
+            }
+        });
+
+        // ── 3. MEMORY BLOCK NODES ─────────────────────────────────────────────────
+        const memoryFiles = [
+            '/root/.openclaw/agents/steward/workspace/MEMORY.md',
+        ];
+
+        memoryFiles.forEach(file => {
+            try {
+                const stat = fs.statSync(file);
+                const name = path.basename(file);
+                const mtime = stat.mtime.toISOString();
+                addNode(`memory:${name}`, 'memory', name, `modified ${mtime}`);
+            } catch (_) {
+                // File may not exist
+            }
+        });
+
+        // ── 4. TOOL / PLUGIN NODES ─────────────────────────────────────────────────
+        const tools = [
+            { id: 'tool:hybrid-search',  label: 'hybrid-search',  desc: 'Vector + BM25 hybrid retrieval' },
+            { id: 'tool:episodic-claw',  label: 'episodic-claw',  desc: 'Episodic memory layer' },
+            { id: 'tool:graphrag',       label: 'graphrag',        desc: 'GraphRAG knowledge augmentation' },
+            { id: 'tool:mcp-server',     label: 'mcp-server',      desc: 'MCP tool server' },
+        ];
+
+        tools.forEach(t => {
+            addNode(t.id, 'tool', t.label, t.desc);
+        });
+
+        // ── 5. A2A COMMUNICATION EDGES (from WORKFLOW.md) ────────────────────────
+        const a2aEdges = [
+            // Top-down: Steward → Triad
+            ['steward',    'alpha',    'a2a_communicates'],
+            ['steward',    'beta',     'a2a_communicates'],
+            ['steward',    'charlie',  'a2a_communicates'],
+            // Explorer → Triad (findings)
+            ['explorer',   'alpha',    'a2a_communicates'],
+            ['explorer',   'beta',     'a2a_communicates'],
+            ['explorer',   'charlie',  'a2a_communicates'],
+            // Examiner → Triad (questions/challenges)
+            ['examiner',   'alpha',    'a2a_communicates'],
+            ['examiner',   'beta',     'a2a_communicates'],
+            ['examiner',   'charlie',  'a2a_communicates'],
+            // Triad → Sentinel (proposals for safety review)
+            ['alpha',      'sentinel', 'a2a_communicates'],
+            ['beta',       'sentinel', 'a2a_communicates'],
+            ['charlie',    'sentinel', 'a2a_communicates'],
+            // Sentinel → Triad (safety feedback)
+            ['sentinel',   'alpha',    'a2a_communicates'],
+            ['sentinel',   'beta',     'a2a_communicates'],
+            ['sentinel',   'charlie',  'a2a_communicates'],
+            // Triad → Coder (ratified proposals)
+            ['alpha',      'coder',    'a2a_communicates'],
+            ['beta',       'coder',    'a2a_communicates'],
+            ['charlie',    'coder',    'a2a_communicates'],
+            // Steward ← Triad (responses)
+            ['alpha',      'steward',  'a2a_communicates'],
+            ['beta',       'steward',  'a2a_communicates'],
+            ['charlie',    'steward',  'a2a_communicates'],
+            // Steward → Coder (final authorization)
+            ['steward',    'coder',    'a2a_communicates'],
+        ];
+
+        a2aEdges.forEach(([src, tgt, type]) => {
+            if (seenNode(src) && seenNode(tgt)) {
+                addEdge(src, tgt, type);
+            }
+        });
+
+        // ── 6. AGENT → SKILL EDGES (role-based mapping) ───────────────────────────
+        const agentSkillMap = {
+            'steward':   ['skill:governance-modules', 'skill:constitutional-deliberation'],
+            'alpha':     ['skill:governance-modules', 'skill:quorum-enforcement'],
+            'beta':      ['skill:governance-modules', 'skill:quorum-enforcement'],
+            'charlie':   ['skill:governance-modules', 'skill:quorum-enforcement'],
+            'sentinel':  ['skill:governance-modules', 'skill:constitutional-deliberation'],
+            'examiner':  ['skill:constitutional-deliberation'],
+            'explorer':  ['skill:clawhub'],
+            'coder':     ['skill:skill-creator', 'skill:github', 'skill:gh-issues'],
+        };
+
+        Object.entries(agentSkillMap).forEach(([agentId, skillIds]) => {
+            skillIds.forEach(skillId => {
+                if (seenNode(agentId) && seenNode(skillId)) {
+                    addEdge(agentId, skillId, 'uses');
+                }
+            });
+        });
+
+        // ── 7. AGENT → TOOL DEPENDENCY EDGES ─────────────────────────────────────
+        const agentToolMap = {
+            'steward':    ['tool:hybrid-search', 'tool:episodic-claw'],
+            'alpha':      ['tool:hybrid-search'],
+            'beta':       ['tool:hybrid-search'],
+            'charlie':    ['tool:hybrid-search'],
+            'sentinel':   ['tool:hybrid-search'],
+            'examiner':   ['tool:hybrid-search'],
+            'explorer':   ['tool:hybrid-search', 'tool:graphrag'],
+            'coder':      ['tool:mcp-server', 'tool:hybrid-search'],
+        };
+
+        Object.entries(agentToolMap).forEach(([agentId, toolIds]) => {
+            toolIds.forEach(toolId => {
+                if (seenNode(agentId) && seenNode(toolId)) {
+                    addEdge(agentId, toolId, 'depends_on');
+                }
+            });
+        });
+
+        // ── 8. MEMORY → AGENT ATTACHMENT EDGES ───────────────────────────────────
+        const memoryAgentMap = {
+            'memory:MEMORY.md': ['steward', 'alpha', 'beta', 'charlie', 'sentinel', 'examiner', 'explorer', 'coder'],
+        };
+
+        Object.entries(memoryAgentMap).forEach(([memId, agentIds]) => {
+            agentIds.forEach(agentId => {
+                if (seenNode(memId) && seenNode(agentId)) {
+                    addEdge(memId, agentId, 'attached_to');
+                }
+            });
+        });
+
+        return { nodes, edges };
+    }
+
+    /**
+     * GET /api/memory/graph - Collective memory graph
+     * @private
+     */
+    async getMemoryGraph(req, res) {
+        const { nodes, edges } = this._buildMemoryGraph();
+
+        this._sendJson(res, {
+            timestamp: new Date().toISOString(),
+            meta: {
+                totalNodes: nodes.length,
+                totalEdges: edges.length,
+                nodeTypes: [...new Set(nodes.map(n => n.type))],
+                edgeTypes: [...new Set(edges.map(e => e.type))],
+            },
+            nodes,
+            edges,
         });
     }
 
