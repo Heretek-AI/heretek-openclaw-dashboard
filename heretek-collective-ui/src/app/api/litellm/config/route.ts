@@ -19,8 +19,8 @@ const mockLiteLLMConfig = {
     },
   ],
   general_settings: {
-    master_key: 'sk-1234',
-    database_url: 'postgresql://...',
+    master_key: process.env.LITELLM_MASTER_KEY || '<your-litellm-master-key>',
+    database_url: process.env.DATABASE_URL || '<your-database-url>',
   },
   litellm_settings: {
     drop_params: true,
