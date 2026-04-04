@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Heretek Collective UI
+  collective-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: heretek-collective-ui
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - GATEWAY_URL=ws://host.docker.internal:18789
+      - LITELLM_URL=http://host.docker.internal:4000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - DATABASE_URL=postgresql://heretek:zHNb5MMUOWEHWcv8pHTOpl+hwoLCAi1v@host.docker.internal:5432/heretek
+      - REDIS_URL=redis://host.docker.internal:6379
+      - QDRANT_URL=http://host.docker.internal:6333
+    depends_on:
+      - gateway-health
+    restart: unless-stopped
+    networks:
+      - heretek-network
+
+  # Gateway Health Check (wait for gateway)
+  gateway-health:
+    image: curlimages/curl:latest
+    container_name: heretek-gateway-health
+    command: >
+      sh -c '
+        echo "Waiting for Gateway...";
+        until curl -sf http://host.docker.internal:18789/health; do
+          sleep 2;
+        done;
+        echo "Gateway ready!"
+      '
+    restart: "no"
+    networks:
+      - heretek-network
+
+  # Optional: Langfuse for observability
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: heretek-langfuse
+    ports:
+      - "3001:3000"
+    environment:
+      - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      - NEXTAUTH_SECRET=your-secret-key
+      - NEXTAUTH_URL=http://localhost:3001
+    depends_on:
+      - langfuse-db
+    restart: unless-stopped
+    networks:
+      - heretek-network
+
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: heretek-langfuse-db
+    environment:
+      - POSTGRES_USER=langfuse
+      - POSTGRES_PASSWORD=langfuse
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - heretek-network
+
+volumes:
+  langfuse-db-data:
+
+networks:
+  heretek-network:
+    driver: bridge

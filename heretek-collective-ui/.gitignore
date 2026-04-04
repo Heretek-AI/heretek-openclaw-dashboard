@@ -1,40 +1,35 @@
 # Dependencies
 node_modules/
+.pnp
+.pnp.js
 
-# Build outputs
+# Testing
+coverage/
+
+# Next.js
 .next/
 out/
-dist/
+
+# Production
 build/
+dist/
 
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# Misc
 .DS_Store
-Thumbs.db
+*.pem
 
-# Logs
-*.log
+# Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Cache
-.cache/
-.turbo/
+# Local env files
+.env*.local
+.env
 
-# Testing
-coverage/
-.nyc_output/
+# Vercel
+.vercel
 
-# Misc
+# TypeScript
 *.tsbuildinfo
+next-env.d.ts
