@@ -1,80 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Disable static generation for this route
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 const encoder = new TextEncoder()
 
 export async function GET(request: NextRequest) {
-  try {
-    // Create a readable stream for SSE
-    const stream = new ReadableStream({
-      async start(controller) {
-        // Mock A2A messages - replace with actual WebSocket/Gateway stream
-        const mockMessages = [
-          {
-            traceId: 'trace-001',
-            from: 'agent-001',
-            to: 'agent-002',
-            type: 'query',
-            content: { message: 'What is the current budget status?' },
-            timestamp: new Date().toISOString(),
-            latency: 45,
-          },
-          {
-            traceId: 'trace-002',
-            from: 'agent-002',
-            to: 'agent-003',
-            type: 'response',
-            content: { message: 'Budget utilization at 67%' },
-            timestamp: new Date().toISOString(),
-            latency: 32,
-          },
-          {
-            traceId: 'trace-003',
-            from: 'agent-003',
-            to: 'agent-001',
-            type: 'decision',
-            content: { message: 'Initiating cost optimization' },
-            timestamp: new Date().toISOString(),
-            latency: 28,
-          },
-        ]
+  const gatewayUrl = process.env.GATEWAY_URL || 'ws://localhost:18789'
+  const apiKey = process.env.GATEWAY_API_KEY
 
-        // Send messages periodically
-        for (const message of mockMessages) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(message)}\n\n`)
-          )
-          await new Promise((resolve) => setTimeout(resolve, 2000))
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        const headers: Record<string, string> = {}
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+        const gatewayHttp = gatewayUrl.replace(/^ws/, 'http')
+        // SKEP-08 FIX: Add server-side timeout (5 minutes) in addition to client abort signal
+        const timeoutSignal = AbortSignal.timeout(300000)
+        const abortController = new AbortController()
+        
+        // Combine client signal and server timeout
+        request.signal.addEventListener('abort', () => abortController.abort())
+        timeoutSignal.addEventListener('abort', () => abortController.abort())
+        
+        const response = await fetch(`${gatewayHttp}/a2a/stream`, {
+          headers,
+          signal: abortController.signal,
+        })
+
+        if (!response.ok || !response.body) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Gateway stream unavailable' })}\n\n`))
+          controller.close()
+          return
         }
 
-        // Keep connection open
-        const keepAlive = setInterval(() => {
-          controller.enqueue(encoder.encode(': keep-alive\n\n'))
-        }, 30000)
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
 
-        // Cleanup on close
-        request.signal.addEventListener('abort', () => {
-          clearInterval(keepAlive)
-          controller.close()
-        })
-      },
-    })
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          controller.enqueue(value)
+        }
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    })
-  } catch (error) {
-    console.error('Failed to create A2A stream:', error)
-    return NextResponse.json(
-      { error: 'Failed to create A2A stream' },
-      { status: 500 }
-    )
-  }
+        controller.close()
+      } catch (error) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Stream ended' })}\n\n`))
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
 }

@@ -5,28 +5,30 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // TODO: Replace with actual Vector DB API call
-    // const response = await fetch(`${process.env.VECTOR_DB_URL}/memories/${params.id}`, {
-    //   headers: { 'Authorization': `Bearer ${process.env.VECTOR_DB_KEY}` }
-    // })
-    
-    console.log('Fetching memory:', params.id)
-    
-    return NextResponse.json({
-      memory: {
-        id: params.id,
-        content: 'Memory content',
-        type: 'semantic',
-        metadata: {},
-        createdAt: new Date().toISOString(),
-        pinned: false,
-      },
+    const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333'
+    const apiKey = process.env.QDRANT_API_KEY
+    const headers: Record<string, string> = {}
+    if (apiKey) headers['api-key'] = apiKey
+
+    const response = await fetch(`${qdrantUrl}/collections/swarm_memories/points/${params.id}`, {
+      headers,
+      signal: AbortSignal.timeout(10000),
     })
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Vector DB unavailable', status: response.status },
+        { status: 502 }
+      )
+    }
+
+    const data = await response.json()
+    return NextResponse.json({ memory: data.result })
   } catch (error) {
     console.error('Failed to fetch memory:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch memory' },
-      { status: 500 }
+      { error: 'Vector DB unavailable', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 503 }
     )
   }
 }
@@ -36,18 +38,31 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    // TODO: Replace with actual Vector DB API call
-    console.log('Deleting memory:', params.id)
-    
-    return NextResponse.json({
-      success: true,
-      message: `Memory ${params.id} deleted`,
+    const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333'
+    const apiKey = process.env.QDRANT_API_KEY
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['api-key'] = apiKey
+
+    const response = await fetch(`${qdrantUrl}/collections/swarm_memories/points/delete`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ points: [params.id] }),
+      signal: AbortSignal.timeout(10000),
     })
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Vector DB delete failed', status: response.status },
+        { status: 502 }
+      )
+    }
+
+    return NextResponse.json({ success: true, message: `Memory ${params.id} deleted` })
   } catch (error) {
     console.error('Failed to delete memory:', error)
     return NextResponse.json(
-      { error: 'Failed to delete memory' },
-      { status: 500 }
+      { error: 'Vector DB unavailable' },
+      { status: 503 }
     )
   }
 }

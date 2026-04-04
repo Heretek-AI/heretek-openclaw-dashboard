@@ -114,36 +114,62 @@ function validateLimit(limit: unknown): { valid: boolean; error?: string; value?
   return { valid: true, value: numLimit }
 }
 
-// Mock memory data
-const mockMemories = [
-  {
-    id: 'mem-001',
-    content: 'User asked about deployment strategies for microservices architecture',
-    type: 'episodic' as const,
-    metadata: { source: 'conversation', agent: 'Oracle' },
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-    pinned: false,
-    score: 0.95,
-  },
-  {
-    id: 'mem-002',
-    content: 'Python is a high-level programming language known for its simplicity',
-    type: 'semantic' as const,
-    metadata: { source: 'knowledge_base', topic: 'programming' },
-    createdAt: new Date(Date.now() - 172800000).toISOString(),
-    pinned: true,
-    score: 0.89,
-  },
-  {
-    id: 'mem-003',
-    content: 'Team decided to use PostgreSQL for persistent storage',
-    type: 'shared' as const,
-    metadata: { source: 'decision_log', project: 'OpenClaw' },
-    createdAt: new Date(Date.now() - 259200000).toISOString(),
-    pinned: false,
-    score: 0.87,
-  },
-]
+// AUDIT-FIX: Replace mock data with actual vector search
+// Note: Uses PostgreSQL with pgvector - requires swarm_memories table
+async function searchMemories(query: string, type?: string, limit: number = 20) {
+  // Check for required environment variables
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    throw new Error('DATABASE_URL not configured');
+  }
+
+  try {
+    // Dynamic import to avoid issues when pg is not available
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: dbUrl });
+    const client = await pool.connect();
+    
+    try {
+      // Search in swarm_memories table using text search
+      // For vector search, would use embedding similarity with pgvector
+      let sql = `
+        SELECT id, agent_id, content, accessibility, consciousness_level, 
+               created_at, updated_at,
+               1.0 as score
+        FROM swarm_memories
+        WHERE content::text ILIKE $1
+      `;
+      const params = [`%${query}%`];
+      
+      if (type) {
+        // Filter by metadata type if stored
+        sql += ` AND accessibility = $2`;
+        params.push(type);
+      }
+      
+      sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+      params.push(limit);
+      
+      const result = await client.query(sql, params);
+      
+      return result.rows.map(row => ({
+        id: row.id,
+        content: typeof row.content === 'string' ? JSON.parse(row.content) : row.content,
+        type: 'semantic',
+        metadata: { agentId: row.agent_id, accessibility: row.accessibility },
+        createdAt: row.created_at,
+        pinned: false,
+        score: row.score,
+      }));
+    } finally {
+      client.release();
+      await pool.end();
+    }
+  } catch (error) {
+    console.error('Database search error:', error);
+    throw error;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -194,41 +220,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // TODO: Replace with actual Qdrant/Pinecone vector search
-    // const response = await fetch(`${process.env.VECTOR_DB_URL}/search`, {
-    //   method: 'POST',
-    //   headers: { 
-    //     'Authorization': `Bearer ${process.env.VECTOR_DB_KEY}`,
-    //     'Content-Type': 'application/json'
-    //   },
-    //   body: JSON.stringify({ query: queryValidation.value, type: typeValidation.value, limit: limitValidation.value })
-    // })
-    
-    // Simulate search delay
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    
-    // Filter mock results by type
-    let results = mockMemories
-    if (typeValidation.value) {
-      results = results.filter((m) => m.type === typeValidation.value)
+    // AUDIT-FIX: Replace mock with actual database search
+    try {
+      const results = await searchMemories(
+        queryValidation.value,
+        typeValidation.value,
+        limitValidation.value
+      );
+      
+      return NextResponse.json({
+        memories: results,
+        query: queryValidation.value,
+        type: typeValidation.value || null,
+        limit: limitValidation.value,
+      });
+    } catch (dbError) {
+      console.error('Memory search failed:', dbError);
+      // Return clear error instead of mock fallback
+      return NextResponse.json(
+        { 
+          error: 'Memory search unavailable',
+          details: dbError instanceof Error ? dbError.message : 'Database error',
+          memories: [],
+        },
+        { status: 503 }
+      );
     }
-    
-    // Simple text search simulation
-    if (queryValidation.value) {
-      results = results.filter((m) =>
-        m.content.toLowerCase().includes(queryValidation.value.toLowerCase())
-      )
-    }
-    
-    // Apply limit
-    results = results.slice(0, limitValidation.value)
-    
-    return NextResponse.json({
-      memories: results,
-      query: queryValidation.value,
-      type: typeValidation.value || null,
-      limit: limitValidation.value,
-    })
   } catch (error) {
     console.error('Failed to search memory:', error)
     return NextResponse.json(

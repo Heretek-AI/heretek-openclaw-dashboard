@@ -202,52 +202,50 @@ function validateAgentId(id: unknown): { valid: boolean; error?: string; value?:
   return { valid: true, value: trimmedId }
 }
 
-// Mock agent data - replace with actual Gateway API calls
-const mockAgents = [
-  {
-    id: 'agent-001',
-    name: 'Oracle',
-    status: 'online' as const,
-    model: 'gpt-4-turbo',
-    memoryUsage: '256 MB',
-    lastActive: new Date().toISOString(),
-    websocketReadyState: 1,
-  },
-  {
-    id: 'agent-002',
-    name: 'Scribe',
-    status: 'idle' as const,
-    model: 'claude-3-opus',
-    memoryUsage: '128 MB',
-    lastActive: new Date().toISOString(),
-    websocketReadyState: 1,
-  },
-  {
-    id: 'agent-003',
-    name: 'Architect',
-    status: 'debating' as const,
-    model: 'gpt-4-turbo',
-    memoryUsage: '384 MB',
-    lastActive: new Date().toISOString(),
-    websocketReadyState: 1,
-  },
-]
-
+// GET /api/agents - List all agents
 export async function GET(request: NextRequest) {
   try {
-    // TODO: Replace with actual Gateway API call
-    // const response = await fetch(`${process.env.GATEWAY_URL}/agents`, {
-    //   headers: { 'Authorization': `Bearer ${process.env.GATEWAY_API_KEY}` }
-    // })
+    // AUDIT-FIX: Replace mock data with actual Gateway API call
+    const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:18789';
+    const apiKey = process.env.GATEWAY_API_KEY;
+    
+    const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {};
+    
+    const response = await fetch(`${gatewayUrl}/v1/agents`, {
+      headers,
+      next: { revalidate: 5 }, // Cache for 5 seconds
+    });
+
+    if (!response.ok) {
+      // If Gateway is unavailable, return service unavailable
+      return NextResponse.json(
+        { 
+          error: 'Gateway unavailable', 
+          agents: [],
+          unavailable: true,
+          timestamp: new Date().toISOString(),
+        },
+        { status: 503 }
+      );
+    }
+
+    const data = await response.json();
+    const agents = data?.agents || [];
     
     return NextResponse.json({
-      agents: mockAgents,
+      agents,
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
     console.error('Failed to fetch agents:', error)
+    // AUDIT-FIX: Return clear error instead of mock fallback
     return NextResponse.json(
-      { error: 'Failed to fetch agents' },
+      { 
+        error: 'Failed to fetch agents',
+        agents: [],
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      },
       { status: 500 }
     )
   }
@@ -302,22 +300,49 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // TODO: Replace with actual Gateway API call to deploy agent
-    console.log('Deploying agent:', { 
-      name: nameValidation.value, 
-      model: modelValidation.value,
-      role: roleValidation.value 
-    })
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Agent deployment initiated',
-      agent: {
-        name: nameValidation.value,
-        model: modelValidation.value,
-        role: roleValidation.value || null,
-      },
-    })
+    // AUDIT-FIX: Replace mock with actual Gateway API call
+    const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:18789';
+    const apiKey = process.env.GATEWAY_API_KEY;
+    const headers = apiKey ? { 
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    } : { 'Content-Type': 'application/json' };
+
+    try {
+      const response = await fetch(`${gatewayUrl}/api/v1/agents`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          name: nameValidation.value,
+          model: modelValidation.value,
+          role: roleValidation.value || 'general',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return NextResponse.json(
+          { error: `Gateway error: ${response.status}`, details: errorData },
+          { status: response.status }
+        );
+      }
+
+      const result = await response.json();
+      return NextResponse.json({
+        success: true,
+        message: 'Agent deployment initiated',
+        agent: result,
+      });
+    } catch (apiError) {
+      // If API call fails, return clear error
+      return NextResponse.json(
+        { 
+          error: 'Failed to deploy agent',
+          details: apiError instanceof Error ? apiError.message : 'Unknown error',
+        },
+        { status: 503 }
+      );
+    }
   } catch (error) {
     console.error('Failed to deploy agent:', error)
     return NextResponse.json(

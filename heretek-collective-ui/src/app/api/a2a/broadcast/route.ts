@@ -1,42 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { message } = body
-    
+
     if (!message) {
+      return NextResponse.json({ error: 'Message is required' }, { status: 400 })
+    }
+
+    const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:18789'
+    const apiKey = process.env.GATEWAY_API_KEY
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+    const response = await fetch(`${gatewayUrl.replace(/^ws/, 'http')}/a2a/broadcast`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ message, target: 'all_agents' }),
+      signal: AbortSignal.timeout(10000),
+    })
+
+    if (!response.ok) {
       return NextResponse.json(
-        { error: 'Message is required' },
-        { status: 400 }
+        { error: 'Gateway broadcast failed', status: response.status },
+        { status: 502 }
       )
     }
-    
-    // TODO: Replace with actual Gateway broadcast API call
-    // const response = await fetch(`${process.env.GATEWAY_URL}/a2a/broadcast`, {
-    //   method: 'POST',
-    //   headers: { 
-    //     'Authorization': `Bearer ${process.env.GATEWAY_API_KEY}`,
-    //     'Content-Type': 'application/json'
-    //   },
-    //   body: JSON.stringify({ message, target: 'all_agents' })
-    // })
-    
-    console.log('Broadcasting to collective:', message)
-    
-    // Simulate broadcast delay
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Broadcast sent to collective',
-      traceId: `trace-${Date.now()}`,
-    })
+
+    const result = await response.json()
+    return NextResponse.json(result)
   } catch (error) {
     console.error('Failed to broadcast:', error)
     return NextResponse.json(
-      { error: 'Failed to broadcast to collective' },
-      { status: 500 }
+      { error: 'Gateway unavailable', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 503 }
     )
   }
 }

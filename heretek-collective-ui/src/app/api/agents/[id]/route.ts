@@ -1,58 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Mock agent data
-const mockAgents = [
-  {
-    id: 'agent-001',
-    name: 'Oracle',
-    status: 'online' as const,
-    model: 'gpt-4-turbo',
-    memoryUsage: '256 MB',
-    lastActive: new Date().toISOString(),
-  },
-  {
-    id: 'agent-002',
-    name: 'Scribe',
-    status: 'idle' as const,
-    model: 'claude-3-opus',
-    memoryUsage: '128 MB',
-    lastActive: new Date().toISOString(),
-  },
-  {
-    id: 'agent-003',
-    name: 'Architect',
-    status: 'debating' as const,
-    model: 'gpt-4-turbo',
-    memoryUsage: '384 MB',
-    lastActive: new Date().toISOString(),
-  },
-]
-
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const agent = mockAgents.find((a) => a.id === params.id)
-    
-    if (!agent) {
+    const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:18789'
+    const apiKey = process.env.GATEWAY_API_KEY
+    const headers: Record<string, string> = {}
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+    const response = await fetch(`${gatewayUrl.replace(/^ws/, 'http')}/v1/agents/${params.id}`, {
+      headers,
+      signal: AbortSignal.timeout(10000),
+    })
+
+    if (!response.ok) {
       return NextResponse.json(
-        { error: 'Agent not found' },
-        { status: 404 }
+        { error: 'Agent not found', status: response.status },
+        { status: response.status === 404 ? 404 : 502 }
       )
     }
-    
-    // TODO: Replace with actual Gateway API call
-    // const response = await fetch(`${process.env.GATEWAY_URL}/agents/${params.id}`, {
-    //   headers: { 'Authorization': `Bearer ${process.env.GATEWAY_API_KEY}` }
-    // })
-    
-    return NextResponse.json({ agent })
+
+    const data = await response.json()
+    return NextResponse.json({ agent: data.agent || data })
   } catch (error) {
     console.error('Failed to fetch agent:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch agent' },
-      { status: 500 }
+      { error: 'Gateway unavailable', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 503 }
     )
   }
 }
@@ -63,19 +39,32 @@ export async function PUT(
 ) {
   try {
     const body = await request.json()
-    
-    // TODO: Replace with actual Gateway API call to update agent config
-    console.log('Updating agent:', params.id, body)
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Agent updated successfully',
+    const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:18789'
+    const apiKey = process.env.GATEWAY_API_KEY
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+    const response = await fetch(`${gatewayUrl.replace(/^ws/, 'http')}/v1/agents/${params.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
     })
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Agent update failed', status: response.status },
+        { status: 502 }
+      )
+    }
+
+    const result = await response.json()
+    return NextResponse.json({ success: true, agent: result })
   } catch (error) {
     console.error('Failed to update agent:', error)
     return NextResponse.json(
-      { error: 'Failed to update agent' },
-      { status: 500 }
+      { error: 'Gateway unavailable' },
+      { status: 503 }
     )
   }
 }

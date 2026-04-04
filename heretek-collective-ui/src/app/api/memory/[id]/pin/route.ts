@@ -5,18 +5,33 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    // TODO: Replace with actual Vector DB API call to pin memory
-    console.log('Pinning memory:', params.id)
-    
-    return NextResponse.json({
-      success: true,
-      message: `Memory ${params.id} pinned`,
+    const qdrantUrl = process.env.QDRANT_URL || 'http://localhost:6333'
+    const apiKey = process.env.QDRANT_API_KEY
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['api-key'] = apiKey
+
+    const response = await fetch(`${qdrantUrl}/collections/swarm_memories/points`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        points: [{ id: params.id, payload: { pinned: true } }],
+      }),
+      signal: AbortSignal.timeout(10000),
     })
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Vector DB unavailable', status: response.status },
+        { status: 502 }
+      )
+    }
+
+    return NextResponse.json({ success: true, message: `Memory ${params.id} pinned` })
   } catch (error) {
     console.error('Failed to pin memory:', error)
     return NextResponse.json(
-      { error: 'Failed to pin memory' },
-      { status: 500 }
+      { error: 'Vector DB unavailable' },
+      { status: 503 }
     )
   }
 }

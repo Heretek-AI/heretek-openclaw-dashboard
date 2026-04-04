@@ -5,31 +5,32 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    // TODO: Replace with actual Gateway API call to deploy agent
-    // const response = await fetch(`${process.env.GATEWAY_URL}/agents/${params.id}/deploy`, {
-    //   method: 'POST',
-    //   headers: { 
-    //     'Authorization': `Bearer ${process.env.GATEWAY_API_KEY}`,
-    //     'Content-Type': 'application/json'
-    //   },
-    //   body: JSON.stringify({ action: 'deploy' })
-    // })
-    
-    console.log('Deploying agent:', params.id)
-    
-    // Simulate deployment delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    
-    return NextResponse.json({
-      success: true,
-      message: `Agent ${params.id} deployment initiated`,
-      status: 'deploying',
+    const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:18789'
+    const apiKey = process.env.GATEWAY_API_KEY
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+    const response = await fetch(`${gatewayUrl.replace(/^ws/, 'http')}/v1/agents/${params.id}/deploy`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'deploy' }),
+      signal: AbortSignal.timeout(30000),
     })
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'Deploy failed', status: response.status },
+        { status: 502 }
+      )
+    }
+
+    const result = await response.json()
+    return NextResponse.json(result)
   } catch (error) {
     console.error('Failed to deploy agent:', error)
     return NextResponse.json(
-      { error: 'Failed to deploy agent' },
-      { status: 500 }
+      { error: 'Gateway unavailable', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 503 }
     )
   }
 }

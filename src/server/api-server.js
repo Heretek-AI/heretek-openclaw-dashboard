@@ -100,8 +100,12 @@ class ApiServer extends EventEmitter {
             host: config.host || process.env.DASHBOARD_HOST || '0.0.0.0',
             gatewayUrl: config.gatewayUrl || process.env.GATEWAY_URL || 'http://localhost:18789',
             observabilityPath: config.observabilityPath,
-            cors: config.cors !== undefined ? config.cors : true,
-            debug: config.debug !== undefined ? config.debug : false
+            // AUDIT-FIX: B7 — CORS defaults to false, require explicit opt-in
+            cors: config.cors === true,
+            debug: config.debug !== undefined ? config.debug : false,
+            // AUDIT-FIX: B6 — API key authentication, disabled only via env in dev
+            apiKey: config.apiKey || process.env.DASHBOARD_API_KEY || null,
+            authDisabled: process.env.DASHBOARD_AUTH_DISABLED === 'true',
         };
 
         // Internal state
@@ -224,6 +228,13 @@ class ApiServer extends EventEmitter {
             return;
         }
 
+        // SKEP-02 FIX: Require DASHBOARD_API_KEY or refuse to start
+        if (!this.config.authDisabled && !this.config.apiKey) {
+            const error = new Error('DASHBOARD_API_KEY environment variable is required. Set DASHBOARD_API_KEY or set DASHBOARD_AUTH_DISABLED=true (not recommended in production)');
+            console.error('[ApiServer] CRITICAL:', error.message);
+            throw error;
+        }
+
         return new Promise((resolve, reject) => {
             try {
                 this.server = http.createServer(this._handleRequest.bind(this));
@@ -281,6 +292,34 @@ class ApiServer extends EventEmitter {
         const parsedUrl = url.parse(req.url, true);
         const pathname = parsedUrl.pathname;
         const method = req.method;
+
+        // AUDIT-FIX: B6 — Enforce API key authentication before any route handling
+        // SKEP-04 FIX: Use crypto.timingSafeEqual to prevent timing attacks
+        // SKEP-07 FIX: Parse Authorization header properly (case-insensitive, split on space)
+        if (!this.config.authDisabled && this.config.apiKey) {
+            const authHeader = req.headers['authorization'] || '';
+            // Properly parse Bearer token: split on space, take second part
+            const parts = authHeader.split(' ');
+            const providedKey = parts.length === 2 && parts[0].toLowerCase() === 'bearer' 
+                ? parts[1] 
+                : authHeader;
+            
+            // Use timing-safe comparison to prevent timing attacks
+            const providedBuffer = Buffer.from(providedKey);
+            const expectedBuffer = Buffer.from(this.config.apiKey);
+            const isValid = providedBuffer.length === expectedBuffer.length && 
+                           require('crypto').timingSafeEqual(providedBuffer, expectedBuffer);
+            
+            if (!isValid) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Unauthorized', status: 401 }));
+                return;
+            }
+        } else if (!this.config.authDisabled && !this.config.apiKey) {
+            if (this.config.debug) {
+                console.warn('[ApiServer] WARN: DASHBOARD_API_KEY not set — API is unauthenticated');
+            }
+        }
 
         // CORS headers
         if (this.config.cors) {
